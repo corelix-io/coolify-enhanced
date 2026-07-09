@@ -1,0 +1,75 @@
+# =================================================================
+# Build the self-hosted Supabase backup sidecar image
+# =================================================================
+# Builds coolify-enhanced-templates/docker/supabase-backup/ and pushes it to
+# the GHCR package the `supabase-backup.yaml` template references:
+#   ghcr.io/corelix-io/coolify-enhanced-templates/supabase-backup
+#
+# WHY THIS LIVES IN THE PLATFORM REPO (not the templates subdir):
+# publish-templates.yml syncs coolify-enhanced-templates/ to the public repo
+# but DELETES .github before pushing (and the free-edition job FAILS if any
+# .github dir survives). A workflow placed under
+# coolify-enhanced-templates/.github/ can therefore never run in the public
+# mirror. The platform repo owns the Dockerfile+scripts source and already
+# publishes to the corelix-io org GHCR namespace, so the build lives here and
+# targets the fixed org-scoped package name (NOT github.repository, which would
+# resolve to corelix-io/platform and mint the wrong image name).
+#
+# One-time setup: after the first push, set the GHCR package
+# `coolify-enhanced-templates/supabase-backup` visibility to Public so Coolify
+# can pull it without auth.
+# =================================================================
+
+name: Build supabase-backup image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'coolify-enhanced-templates/docker/supabase-backup/**'
+      - '.github/workflows/build-supabase-backup-image.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  # Fixed package name — must match the image ref in
+  # coolify-enhanced-templates/templates/compose/supabase-backup.yaml.
+  IMAGE: ghcr.io/corelix-io/coolify-enhanced-templates/supabase-backup
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: coolify-enhanced-templates/docker/supabase-backup
+          platforms: linux/amd64,linux/arm64
+          push: true
+          # Postgres 15 to match Coolify's pinned supabase/postgres 15.x.
+          build-args: |
+            BASE_IMAGE=postgres:15-alpine
+          tags: |
+            ${{ env.IMAGE }}:15
+            ${{ env.IMAGE }}:15-${{ github.sha }}
+            ${{ env.IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

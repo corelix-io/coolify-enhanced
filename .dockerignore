@@ -1,0 +1,28 @@
+.git
+.github
+.claude
+*.md
+!README.md
+tests/
+docs/
+node_modules/
+mcp-server/node_modules/
+.env
+.env.*
+!.env.free
+.free-edition-ignore
+scripts/
+# Exclude docker/ build tooling from the broad `COPY .` package copy, but keep the
+# specific assets the dedicated COPY steps in the Dockerfile need (s6-overlay service,
+# whitelabel.sh, brands). Use `docker/*` (not `docker/`) so the directory itself is not
+# pruned and the `!` re-includes below actually take effect. The re-included assets are
+# stripped from the installed package by a RUN in the Dockerfile.
+docker/*
+!docker/s6-overlay
+!docker/whitelabel.sh
+!docker/brands
+vendor/
+*.log
+.phpunit*
+.pest*
+coverage/

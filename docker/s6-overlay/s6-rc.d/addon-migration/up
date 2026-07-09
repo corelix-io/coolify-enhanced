@@ -1,0 +1,11 @@
+#!/command/execlineb -P
+
+# Run addon migrations after Coolify's main migrations.
+# Exec directly (no foreground {}) so artisan exit code propagates to the oneshot.
+with-contenv
+cd /var/www/html
+php
+artisan
+migrate
+--path=vendor/corelix-io/platform/database/migrations
+--force

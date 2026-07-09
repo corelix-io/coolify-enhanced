@@ -1,0 +1,274 @@
+/**
+ * Corelix Platform — Linear-inspired corporate SaaS theme
+ * Scoped to [data-ce-theme="enhanced"] only.
+ * No DOM/layout changes; visual polish only.
+ */
+
+/* =========================================================
+   Light mode tokens (clean enterprise surfaces)
+   ========================================================= */
+html[data-ce-theme="enhanced"] {
+    color-scheme: light;
+    --ce-bg: #f5f7fb;
+    --ce-surface-1: #ffffff;
+    --ce-surface-2: #eef2f8;
+    --ce-border: #dce3ef;
+    --ce-border-strong: #c9d3e4;
+    --ce-text-primary: #0f172a;
+    --ce-text-secondary: #5b6476;
+    --ce-accent: #5b6cf8;
+    --ce-accent-strong: #4658e8;
+    --ce-accent-soft: #e8ecff;
+    --ce-success: #10b981;
+    --ce-warning: #f59e0b;
+    --ce-danger: #ef4444;
+    --ce-ring: rgb(91 108 248 / 0.38);
+    --ce-shadow-soft: 0 6px 16px rgb(15 23 42 / 0.06);
+    --ce-shadow-card: 0 1px 2px rgb(15 23 42 / 0.08), 0 8px 24px rgb(15 23 42 / 0.06);
+
+    /* Keep Coolify tokens aligned with the design system */
+    --color-base: var(--ce-bg);
+    --color-coolgray-100: var(--ce-surface-1);
+    --color-coolgray-200: var(--ce-surface-2);
+    --color-coolgray-300: var(--ce-border);
+    --color-coolgray-400: var(--ce-border-strong);
+    --color-coolgray-500: #8b95a8;
+    --color-coollabs-50: var(--ce-accent-soft);
+    --color-coollabs: var(--ce-accent);
+    --color-coollabs-100: var(--ce-accent-strong);
+    --color-coollabs-200: #3e4ed1;
+    --color-coollabs-300: #303ca8;
+    --color-warning: var(--ce-warning);
+    --color-warning-400: #fbbf24;
+    --color-warning-500: #f59e0b;
+    --color-success: var(--ce-success);
+    --color-error: var(--ce-danger);
+}
+
+/* =========================================================
+   Dark mode tokens (Linear-style deep neutrals)
+   ========================================================= */
+html.dark[data-ce-theme="enhanced"] {
+    color-scheme: dark;
+    --ce-bg: #080b12;
+    --ce-surface-1: #101521;
+    --ce-surface-2: #151b29;
+    --ce-border: #242d40;
+    --ce-border-strong: #2f3a52;
+    --ce-text-primary: #e8ecf7;
+    --ce-text-secondary: #9aa5bb;
+    --ce-accent: #7d8dff;
+    --ce-accent-strong: #94a2ff;
+    --ce-accent-soft: #1f2756;
+    --ce-success: #22c55e;
+    --ce-warning: #f59e0b;
+    --ce-danger: #f87171;
+    --ce-ring: rgb(125 141 255 / 0.5);
+    --ce-shadow-soft: 0 8px 24px rgb(2 6 23 / 0.38);
+    --ce-shadow-card: 0 1px 2px rgb(2 6 23 / 0.5), 0 16px 36px rgb(2 6 23 / 0.4);
+
+    --color-base: var(--ce-bg);
+    --color-coolgray-100: var(--ce-surface-1);
+    --color-coolgray-200: var(--ce-surface-2);
+    --color-coolgray-300: var(--ce-border);
+    --color-coolgray-400: var(--ce-border-strong);
+    --color-coolgray-500: #6f7b95;
+    --color-coollabs-50: var(--ce-accent-soft);
+    --color-coollabs: var(--ce-accent);
+    --color-coollabs-100: var(--ce-accent-strong);
+    --color-coollabs-200: #6578ff;
+    --color-coollabs-300: #4f61e8;
+    --color-warning: var(--ce-warning);
+    --color-warning-400: #fbbf24;
+    --color-warning-500: #f59e0b;
+    --color-success: var(--ce-success);
+    --color-error: var(--ce-danger);
+}
+
+/* =========================================================
+   Foundation: background, text, borders
+   ========================================================= */
+html[data-ce-theme="enhanced"] body,
+html[data-ce-theme="enhanced"] .dark\:bg-base,
+html[data-ce-theme="enhanced"] .bg-gray-50 {
+    background-color: var(--ce-bg) !important;
+}
+
+html[data-ce-theme="enhanced"] .dark\:bg-coolgray-100,
+html[data-ce-theme="enhanced"] .dark\:bg-coolgray-200 {
+    background-color: var(--ce-surface-1) !important;
+}
+
+html[data-ce-theme="enhanced"] .bg-white {
+    background-color: var(--ce-surface-1) !important;
+    border-color: var(--ce-border);
+    box-shadow: var(--ce-shadow-card);
+}
+
+html[data-ce-theme="enhanced"] .border-neutral-200,
+html[data-ce-theme="enhanced"] .dark\:border-transparent,
+html[data-ce-theme="enhanced"] .dark\:border-coolgray-200,
+html[data-ce-theme="enhanced"] .dark\:border-coolgray-200\/50,
+html[data-ce-theme="enhanced"] .divide-neutral-300,
+html[data-ce-theme="enhanced"] .dark\:divide-coolgray-200 {
+    border-color: var(--ce-border) !important;
+}
+
+html[data-ce-theme="enhanced"] .dark\:text-white,
+html[data-ce-theme="enhanced"] .text-black {
+    color: var(--ce-text-primary) !important;
+}
+
+html[data-ce-theme="enhanced"] .dark\:text-neutral-400,
+html[data-ce-theme="enhanced"] .text-neutral-600,
+html[data-ce-theme="enhanced"] .subtitle {
+    color: var(--ce-text-secondary) !important;
+}
+
+/* =========================================================
+   Accent system and feedback colors
+   ========================================================= */
+html[data-ce-theme="enhanced"] .text-coollabs,
+html[data-ce-theme="enhanced"] .dark\:text-coollabs {
+    color: var(--ce-accent) !important;
+}
+
+html[data-ce-theme="enhanced"] .bg-coollabs {
+    background-color: var(--ce-accent) !important;
+}
+
+html[data-ce-theme="enhanced"] .hover\:bg-coollabs-100:hover {
+    background-color: var(--ce-accent-strong) !important;
+}
+
+html[data-ce-theme="enhanced"] .text-success {
+    color: var(--ce-success) !important;
+}
+
+html[data-ce-theme="enhanced"] .text-warning {
+    color: var(--ce-warning) !important;
+}
+
+html[data-ce-theme="enhanced"] .text-error {
+    color: var(--ce-danger) !important;
+}
+
+/* =========================================================
+   Navigation and enterprise surfaces
+   ========================================================= */
+html[data-ce-theme="enhanced"] .navbar-main,
+html[data-ce-theme="enhanced"] .bg-white\/95.dark\:bg-base\/95 {
+    border: 1px solid var(--ce-border);
+    background: linear-gradient(180deg, rgb(255 255 255 / 0.9), rgb(255 255 255 / 0.82));
+    box-shadow: var(--ce-shadow-soft);
+    backdrop-filter: blur(10px);
+}
+
+html.dark[data-ce-theme="enhanced"] .navbar-main,
+html.dark[data-ce-theme="enhanced"] .bg-white\/95.dark\:bg-base\/95 {
+    background: linear-gradient(180deg, rgb(16 21 33 / 0.94), rgb(16 21 33 / 0.88));
+}
+
+/* =========================================================
+   Form controls and readability polish
+   ========================================================= */
+html[data-ce-theme="enhanced"] input.input,
+html[data-ce-theme="enhanced"] textarea.input,
+html[data-ce-theme="enhanced"] select.input,
+html[data-ce-theme="enhanced"] .input {
+    border-color: var(--ce-border) !important;
+    background-color: var(--ce-surface-1) !important;
+    color: var(--ce-text-primary) !important;
+    border-radius: 0.625rem;
+    box-shadow: none;
+    transition: border-color 140ms ease, box-shadow 140ms ease, background-color 140ms ease;
+}
+
+html.dark[data-ce-theme="enhanced"] input.input,
+html.dark[data-ce-theme="enhanced"] textarea.input,
+html.dark[data-ce-theme="enhanced"] select.input,
+html.dark[data-ce-theme="enhanced"] .input {
+    background-color: var(--ce-surface-2) !important;
+}
+
+html[data-ce-theme="enhanced"] input.input:hover,
+html[data-ce-theme="enhanced"] textarea.input:hover,
+html[data-ce-theme="enhanced"] select.input:hover,
+html[data-ce-theme="enhanced"] .input:hover {
+    border-color: var(--ce-border-strong) !important;
+}
+
+html[data-ce-theme="enhanced"] input.input:focus,
+html[data-ce-theme="enhanced"] textarea.input:focus,
+html[data-ce-theme="enhanced"] select.input:focus,
+html[data-ce-theme="enhanced"] .input:focus {
+    border-color: var(--ce-accent) !important;
+    box-shadow: 0 0 0 3px var(--ce-ring) !important;
+}
+
+/* =========================================================
+   Buttons, links, and interaction details
+   ========================================================= */
+html[data-ce-theme="enhanced"] button,
+html[data-ce-theme="enhanced"] a,
+html[data-ce-theme="enhanced"] input,
+html[data-ce-theme="enhanced"] select,
+html[data-ce-theme="enhanced"] textarea {
+    transition: color 130ms ease, background-color 130ms ease, border-color 130ms ease, box-shadow 130ms ease;
+}
+
+html[data-ce-theme="enhanced"] button:focus-visible,
+html[data-ce-theme="enhanced"] a:focus-visible,
+html[data-ce-theme="enhanced"] input:focus-visible,
+html[data-ce-theme="enhanced"] select:focus-visible,
+html[data-ce-theme="enhanced"] textarea:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--ce-bg), 0 0 0 4px var(--ce-ring);
+}
+
+html[data-ce-theme="enhanced"] a:hover {
+    color: var(--ce-accent) !important;
+}
+
+/* =========================================================
+   Tables, code, and utility polish
+   ========================================================= */
+html[data-ce-theme="enhanced"] table tr:hover {
+    background-color: rgb(232 236 255 / 0.55);
+}
+
+html.dark[data-ce-theme="enhanced"] table tr:hover {
+    background-color: rgb(31 39 86 / 0.58);
+}
+
+html[data-ce-theme="enhanced"] code {
+    background-color: var(--ce-surface-2);
+    color: var(--ce-text-primary);
+    border: 1px solid var(--ce-border);
+    border-radius: 0.4rem;
+    padding: 0.05rem 0.35rem;
+}
+
+html[data-ce-theme="enhanced"] .rounded {
+    border-radius: 0.75rem;
+}
+
+html[data-ce-theme="enhanced"] .rounded-md {
+    border-radius: 0.625rem;
+}
+
+html[data-ce-theme="enhanced"] *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+html[data-ce-theme="enhanced"] *::-webkit-scrollbar-thumb {
+    background-color: var(--ce-border-strong);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+}
+
+html[data-ce-theme="enhanced"] *::-webkit-scrollbar-track {
+    background-color: transparent;
+}
