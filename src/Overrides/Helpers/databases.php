@@ -1,0 +1,546 @@
+<?php
+
+// =============================================================================
+// OVERLAY: Modified version of Coolify's bootstrap/helpers/databases.php
+// =============================================================================
+// This file replaces bootstrap/helpers/databases.php in the Coolify container.
+// Changes from the original are marked with [ENCRYPTION OVERLAY] comments.
+//
+// The only modification is to deleteBackupsS3() which now uses rclone
+// for deletion when the S3 storage has filename encryption enabled.
+// =============================================================================
+
+use CorelixIo\Platform\Services\RcloneService;
+use App\Models\EnvironmentVariable;
+use App\Models\S3Storage;
+use App\Models\Server;
+use App\Models\ServiceDatabase;
+use App\Models\StandaloneClickhouse;
+use App\Models\StandaloneDocker;
+use App\Models\StandaloneDragonfly;
+use App\Models\StandaloneKeydb;
+use App\Models\StandaloneMariadb;
+use App\Models\StandaloneMongodb;
+use App\Models\StandaloneMysql;
+use App\Models\StandalonePostgresql;
+use App\Models\StandaloneRedis;
+use App\Models\SwarmDocker;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
+use Symfony\Component\HttpFoundation\File\Exception\FileNotFoundException;
+use Symfony\Component\HttpFoundation\StreamedResponse;
+
+function create_standalone_postgresql($environmentId, StandaloneDocker|SwarmDocker $destination, ?array $otherData = null, string $databaseImage = 'postgres:16-alpine'): StandalonePostgresql
+{
+    $database = new StandalonePostgresql;
+    $database->uuid = new_public_id();
+    $database->name = 'postgresql-database-'.$database->uuid;
+    $database->image = $databaseImage;
+    $database->postgres_password = Str::password(length: 64, symbols: false);
+    $database->environment_id = $environmentId;
+    $database->destination_id = $destination->id;
+    $database->destination_type = $destination->getMorphClass();
+    if ($otherData) {
+        $database->fill($otherData);
+    }
+    $database->save();
+
+    return $database;
+}
+
+function create_standalone_redis($environment_id, StandaloneDocker|SwarmDocker $destination, ?array $otherData = null): StandaloneRedis
+{
+    $database = new StandaloneRedis;
+    $database->uuid = new_public_id();
+    $database->name = 'redis-database-'.$database->uuid;
+
+    $redis_password = Str::password(length: 64, symbols: false);
+    if ($otherData && isset($otherData['redis_password'])) {
+        $redis_password = $otherData['redis_password'];
+        unset($otherData['redis_password']);
+    }
+
+    $database->environment_id = $environment_id;
+    $database->destination_id = $destination->id;
+    $database->destination_type = $destination->getMorphClass();
+    if ($otherData) {
+        $database->fill($otherData);
+    }
+    $database->save();
+
+    EnvironmentVariable::create([
+        'key' => 'REDIS_PASSWORD',
+        'value' => $redis_password,
+        'resourceable_type' => StandaloneRedis::class,
+        'resourceable_id' => $database->id,
+        'is_shared' => false,
+    ]);
+
+    EnvironmentVariable::create([
+        'key' => 'REDIS_USERNAME',
+        'value' => 'default',
+        'resourceable_type' => StandaloneRedis::class,
+        'resourceable_id' => $database->id,
+        'is_shared' => false,
+    ]);
+
+    return $database;
+}
+
+function create_standalone_mongodb($environment_id, StandaloneDocker|SwarmDocker $destination, ?array $otherData = null): StandaloneMongodb
+{
+    $database = new StandaloneMongodb;
+    $database->uuid = new_public_id();
+    $database->name = 'mongodb-database-'.$database->uuid;
+    $database->mongo_initdb_root_password = Str::password(length: 64, symbols: false);
+    $database->environment_id = $environment_id;
+    $database->destination_id = $destination->id;
+    $database->destination_type = $destination->getMorphClass();
+    if ($otherData) {
+        $database->fill($otherData);
+    }
+    $database->save();
+
+    return $database;
+}
+
+function create_standalone_mysql($environment_id, StandaloneDocker|SwarmDocker $destination, ?array $otherData = null): StandaloneMysql
+{
+    $database = new StandaloneMysql;
+    $database->uuid = new_public_id();
+    $database->name = 'mysql-database-'.$database->uuid;
+    $database->mysql_root_password = Str::password(length: 64, symbols: false);
+    $database->mysql_password = Str::password(length: 64, symbols: false);
+    $database->environment_id = $environment_id;
+    $database->destination_id = $destination->id;
+    $database->destination_type = $destination->getMorphClass();
+    if ($otherData) {
+        $database->fill($otherData);
+    }
+    $database->save();
+
+    return $database;
+}
+
+function create_standalone_mariadb($environment_id, StandaloneDocker|SwarmDocker $destination, ?array $otherData = null): StandaloneMariadb
+{
+    $database = new StandaloneMariadb;
+    $database->uuid = new_public_id();
+    $database->name = 'mariadb-database-'.$database->uuid;
+    $database->mariadb_root_password = Str::password(length: 64, symbols: false);
+    $database->mariadb_password = Str::password(length: 64, symbols: false);
+    $database->environment_id = $environment_id;
+    $database->destination_id = $destination->id;
+    $database->destination_type = $destination->getMorphClass();
+    if ($otherData) {
+        $database->fill($otherData);
+    }
+    $database->save();
+
+    return $database;
+}
+
+function create_standalone_keydb($environment_id, StandaloneDocker|SwarmDocker $destination, ?array $otherData = null): StandaloneKeydb
+{
+    $database = new StandaloneKeydb;
+    $database->uuid = new_public_id();
+    $database->name = 'keydb-database-'.$database->uuid;
+    $database->keydb_password = Str::password(length: 64, symbols: false);
+    $database->environment_id = $environment_id;
+    $database->destination_id = $destination->id;
+    $database->destination_type = $destination->getMorphClass();
+    if ($otherData) {
+        $database->fill($otherData);
+    }
+    $database->save();
+
+    return $database;
+}
+
+function create_standalone_dragonfly($environment_id, StandaloneDocker|SwarmDocker $destination, ?array $otherData = null): StandaloneDragonfly
+{
+    $database = new StandaloneDragonfly;
+    $database->uuid = new_public_id();
+    $database->name = 'dragonfly-database-'.$database->uuid;
+    $database->dragonfly_password = Str::password(length: 64, symbols: false);
+    $database->environment_id = $environment_id;
+    $database->destination_id = $destination->id;
+    $database->destination_type = $destination->getMorphClass();
+    if ($otherData) {
+        $database->fill($otherData);
+    }
+    $database->save();
+
+    return $database;
+}
+
+function create_standalone_clickhouse($environment_id, StandaloneDocker|SwarmDocker $destination, ?array $otherData = null): StandaloneClickhouse
+{
+    $database = new StandaloneClickhouse;
+    $database->uuid = new_public_id();
+    $database->name = 'clickhouse-database-'.$database->uuid;
+    $database->clickhouse_admin_password = Str::password(length: 64, symbols: false);
+    $database->environment_id = $environment_id;
+    $database->destination_id = $destination->id;
+    $database->destination_type = $destination->getMorphClass();
+    if ($otherData) {
+        $database->fill($otherData);
+    }
+    $database->save();
+
+    return $database;
+}
+
+function deleteBackupsLocally(string|array|null $filenames, Server $server, bool $throwError = false): void
+{
+    if (empty($filenames)) {
+        return;
+    }
+    if (is_string($filenames)) {
+        $filenames = [$filenames];
+    }
+    $quotedFiles = array_map(fn ($file) => escapeshellarg($file), $filenames);
+    instant_remote_process(['rm -f '.implode(' ', $quotedFiles)], $server, throwError: $throwError);
+
+    $foldersToCheck = collect($filenames)->map(fn ($file) => dirname($file))->unique();
+    $foldersToCheck->each(fn ($folder) => deleteEmptyBackupFolder($folder, $server));
+}
+
+function streamBackupFromServer(Server $server, string $filename, string $contentType): StreamedResponse
+{
+    $disk = Storage::build([
+        'driver' => 'sftp',
+        'host' => $server->ip,
+        'port' => (int) $server->port,
+        'username' => $server->user,
+        'privateKey' => $server->privateKey->getKeyLocation(),
+        'root' => '/',
+    ]);
+
+    if (! $disk->exists($filename)) {
+        throw new FileNotFoundException($filename);
+    }
+
+    return new StreamedResponse(function () use ($disk, $filename) {
+        if (ob_get_level()) {
+            ob_end_clean();
+        }
+        $stream = $disk->readStream($filename);
+        if ($stream === false || is_null($stream)) {
+            abort(500, 'Failed to open stream for the requested file.');
+        }
+        while (! feof($stream)) {
+            echo fread($stream, 2048);
+            flush();
+        }
+
+        fclose($stream);
+    }, 200, [
+        'Content-Type' => $contentType,
+        'Content-Disposition' => 'attachment; filename="'.basename($filename).'"',
+    ]);
+}
+
+// =========================================================================
+// [ENCRYPTION OVERLAY] Modified deleteBackupsS3() function
+// =========================================================================
+// When the S3 storage has filename encryption enabled, filenames on S3
+// are encrypted and can't be matched by Laravel's S3 driver. In that case,
+// we use rclone (which understands the crypt overlay) for deletion.
+//
+// When filename encryption is off (the default), the original S3 driver
+// approach works fine even for encrypted content.
+// =========================================================================
+function deleteBackupsS3(string|array|null $filenames, S3Storage $s3): void
+{
+    if (empty($filenames) || ! $s3) {
+        return;
+    }
+    if (is_string($filenames)) {
+        $filenames = [$filenames];
+    }
+
+    // [PATH PREFIX OVERLAY] Apply path prefix if configured (upload + retention must match)
+    if (filled($s3->path)) {
+        $pathPrefix = trim($s3->path, '/');
+        $filenames = array_map(function ($filename) use ($pathPrefix) {
+            $cleanFilename = ltrim($filename, '/');
+
+            return $pathPrefix.'/'.$cleanFilename;
+        }, $filenames);
+    }
+
+    // [ENCRYPTION OVERLAY] Check if we need rclone for filename-encrypted S3
+    $hasFilenameEncryption = RcloneService::isEncryptionEnabled($s3)
+        && data_get($s3, 'filename_encryption', 'off') !== 'off';
+
+    if ($hasFilenameEncryption) {
+        // Use rclone for deletion (it can resolve encrypted filenames)
+        $containerName = 'rclone-cleanup-'.uniqid();
+        try {
+            $commands = RcloneService::buildDeleteCommands($s3, $filenames, $containerName);
+            $server = \App\Models\Server::find(0); // Coolify's own server (localhost)
+            if ($server) {
+                instant_remote_process($commands, $server, throwError: false);
+            }
+        } catch (\Throwable $e) {
+            \Log::warning('Failed to delete encrypted S3 backups via rclone', [
+                'error' => $e->getMessage(),
+                'filenames' => $filenames,
+            ]);
+        }
+
+        return;
+    }
+
+    // Original S3 driver approach (works for unencrypted and content-only encryption)
+    $disk = Storage::build([
+        'driver' => 's3',
+        'key' => $s3->key,
+        'secret' => $s3->secret,
+        'region' => $s3->region,
+        'bucket' => $s3->bucket,
+        'endpoint' => $s3->endpoint,
+        'use_path_style_endpoint' => true,
+        'aws_url' => $s3->awsUrl(),
+    ]);
+
+    $disk->delete($filenames);
+}
+
+function deleteEmptyBackupFolder($folderPath, Server $server): void
+{
+    $escapedPath = escapeshellarg($folderPath);
+    $escapedParentPath = escapeshellarg(dirname($folderPath));
+
+    $checkEmpty = instant_remote_process(["[ -d $escapedPath ] && [ -z \"$(ls -A $escapedPath)\" ] && echo 'empty' || echo 'not empty'"], $server, throwError: false);
+
+    if (trim($checkEmpty) === 'empty') {
+        instant_remote_process(["rmdir $escapedPath"], $server, throwError: false);
+        $checkParentEmpty = instant_remote_process(["[ -d $escapedParentPath ] && [ -z \"$(ls -A $escapedParentPath)\" ] && echo 'empty' || echo 'not empty'"], $server, throwError: false);
+        if (trim($checkParentEmpty) === 'empty') {
+            instant_remote_process(["rmdir $escapedParentPath"], $server, throwError: false);
+        }
+    }
+}
+
+function removeOldBackups($backup): void
+{
+    try {
+        if ($backup->executions) {
+            // Delete old local backups (only if local backup is NOT disabled)
+            // Note: When disable_local_backup is enabled, each execution already marks its own
+            // local_storage_deleted status at the time of backup, so we don't need to retroactively
+            // update old executions
+            if (! $backup->disable_local_backup) {
+                $localBackupsToDelete = deleteOldBackupsLocally($backup);
+                if ($localBackupsToDelete->isNotEmpty()) {
+                    $backup->executions()
+                        ->whereIn('id', $localBackupsToDelete->pluck('id'))
+                        ->update(['local_storage_deleted' => true]);
+                }
+            }
+        }
+
+        if ($backup->save_s3 && $backup->executions) {
+            $s3BackupsToDelete = deleteOldBackupsFromS3($backup);
+            if ($s3BackupsToDelete->isNotEmpty()) {
+                $backup->executions()
+                    ->whereIn('id', $s3BackupsToDelete->pluck('id'))
+                    ->update(['s3_storage_deleted' => true]);
+            }
+        }
+
+        // Delete execution records where all backup copies are gone
+        // Case 1: Both local and S3 backups are deleted
+        $backup->executions()
+            ->where('local_storage_deleted', true)
+            ->where('s3_storage_deleted', true)
+            ->delete();
+
+        // Case 2: Local backup is deleted and S3 was never used (s3_uploaded is null)
+        $backup->executions()
+            ->where('local_storage_deleted', true)
+            ->whereNull('s3_uploaded')
+            ->delete();
+
+    } catch (Exception $e) {
+        throw $e;
+    }
+}
+
+function deleteOldBackupsLocally($backup): Collection
+{
+    if (! $backup || ! $backup->executions) {
+        return collect();
+    }
+
+    $successfulBackups = $backup->executions()
+        ->where('status', 'success')
+        ->where('local_storage_deleted', false)
+        ->orderBy('created_at', 'desc')
+        ->get();
+
+    if ($successfulBackups->isEmpty()) {
+        return collect();
+    }
+
+    $retentionAmount = $backup->database_backup_retention_amount_locally;
+    $retentionDays = $backup->database_backup_retention_days_locally;
+    $maxStorageGB = $backup->database_backup_retention_max_storage_locally;
+
+    if ($retentionAmount === 0 && $retentionDays === 0 && $maxStorageGB === 0) {
+        return collect();
+    }
+
+    $backupsToDelete = collect();
+
+    if ($retentionAmount > 0) {
+        $byAmount = $successfulBackups->skip($retentionAmount);
+        $backupsToDelete = $backupsToDelete->merge($byAmount);
+    }
+
+    if ($retentionDays > 0) {
+        $oldestAllowedDate = $successfulBackups->first()->created_at->clone()->utc()->subDays($retentionDays);
+        $oldBackups = $successfulBackups->filter(fn ($execution) => $execution->created_at->utc() < $oldestAllowedDate);
+        $backupsToDelete = $backupsToDelete->merge($oldBackups);
+    }
+
+    if ($maxStorageGB > 0) {
+        $maxStorageBytes = $maxStorageGB * pow(1024, 3);
+        $totalSize = 0;
+        $backupsOverLimit = collect();
+
+        $backupsToCheck = $successfulBackups->skip(1);
+
+        foreach ($backupsToCheck as $backupExecution) {
+            $totalSize += (int) $backupExecution->size;
+            if ($totalSize > $maxStorageBytes) {
+                $backupsOverLimit = $successfulBackups->filter(
+                    fn ($b) => $b->created_at->utc() <= $backupExecution->created_at->utc()
+                )->skip(1);
+                break;
+            }
+        }
+
+        $backupsToDelete = $backupsToDelete->merge($backupsOverLimit);
+    }
+
+    $backupsToDelete = $backupsToDelete->unique('id');
+    $processedBackups = collect();
+
+    $server = null;
+    if ($backup->database_type === ServiceDatabase::class) {
+        $server = $backup->database->service->server;
+    } else {
+        $server = $backup->database->destination->server;
+    }
+
+    if (! $server) {
+        return collect();
+    }
+
+    $filesToDelete = $backupsToDelete
+        ->filter(fn ($execution) => ! empty($execution->filename))
+        ->pluck('filename')
+        ->all();
+
+    if (! empty($filesToDelete)) {
+        deleteBackupsLocally($filesToDelete, $server);
+        $processedBackups = $backupsToDelete;
+    }
+
+    return $processedBackups;
+}
+
+function deleteOldBackupsFromS3($backup): Collection
+{
+    if (! $backup || ! $backup->executions || ! $backup->s3) {
+        return collect();
+    }
+
+    $successfulBackups = $backup->executions()
+        ->where('status', 'success')
+        ->where('s3_storage_deleted', false)
+        ->orderBy('created_at', 'desc')
+        ->get();
+
+    if ($successfulBackups->isEmpty()) {
+        return collect();
+    }
+
+    $retentionAmount = $backup->database_backup_retention_amount_s3;
+    $retentionDays = $backup->database_backup_retention_days_s3;
+    $maxStorageGB = $backup->database_backup_retention_max_storage_s3;
+
+    if ($retentionAmount === 0 && $retentionDays === 0 && $maxStorageGB === 0) {
+        return collect();
+    }
+
+    $backupsToDelete = collect();
+
+    if ($retentionAmount > 0) {
+        $byAmount = $successfulBackups->skip($retentionAmount);
+        $backupsToDelete = $backupsToDelete->merge($byAmount);
+    }
+
+    if ($retentionDays > 0) {
+        $oldestAllowedDate = $successfulBackups->first()->created_at->clone()->utc()->subDays($retentionDays);
+        $oldBackups = $successfulBackups->filter(fn ($execution) => $execution->created_at->utc() < $oldestAllowedDate);
+        $backupsToDelete = $backupsToDelete->merge($oldBackups);
+    }
+
+    if ($maxStorageGB > 0) {
+        $maxStorageBytes = $maxStorageGB * pow(1024, 3);
+        $totalSize = 0;
+        $backupsOverLimit = collect();
+
+        $backupsToCheck = $successfulBackups->skip(1);
+
+        foreach ($backupsToCheck as $backupExecution) {
+            $totalSize += (int) $backupExecution->size;
+            if ($totalSize > $maxStorageBytes) {
+                $backupsOverLimit = $successfulBackups->filter(
+                    fn ($b) => $b->created_at->utc() <= $backupExecution->created_at->utc()
+                )->skip(1);
+                break;
+            }
+        }
+
+        $backupsToDelete = $backupsToDelete->merge($backupsOverLimit);
+    }
+
+    $backupsToDelete = $backupsToDelete->unique('id');
+    $processedBackups = collect();
+
+    $filesToDelete = $backupsToDelete
+        ->filter(fn ($execution) => ! empty($execution->filename))
+        ->pluck('filename')
+        ->all();
+
+    if (! empty($filesToDelete)) {
+        try {
+            deleteBackupsS3($filesToDelete, $backup->s3);
+            $processedBackups = $backupsToDelete;
+        } catch (Throwable $e) {
+            report($e);
+        }
+    }
+
+    return $processedBackups;
+}
+
+function isPublicPortAlreadyUsed(Server $server, int $port, ?string $id = null): bool
+{
+    if ($id) {
+        $foundDatabase = $server->databases()->where('public_port', $port)->where('is_public', true)->where('id', '!=', $id)->first();
+    } else {
+        $foundDatabase = $server->databases()->where('public_port', $port)->where('is_public', true)->first();
+    }
+    if ($foundDatabase) {
+        return true;
+    }
+
+    return false;
+}

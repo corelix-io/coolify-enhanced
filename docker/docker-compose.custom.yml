@@ -1,0 +1,14 @@
+# Docker Compose custom file for Corelix Platform
+#
+# Copy this file to /data/coolify/source/docker-compose.custom.yml
+# Then run: bash /data/coolify/source/upgrade.sh
+#
+# Coolify's install script natively supports docker-compose.custom.yml.
+
+services:
+  coolify:
+    # Use the enhanced image instead of the official one
+    image: ${CUSTOM_COOLIFY_IMAGE:-ghcr.io/corelix-io/coolify-enhanced:1.0.0}
+    environment:
+      # Enable Corelix Platform (granular permissions + encrypted backups)
+      - CORELIX_PLATFORM=true

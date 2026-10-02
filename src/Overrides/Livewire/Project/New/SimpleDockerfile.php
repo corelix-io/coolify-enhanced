@@ -1,0 +1,86 @@
+<?php
+
+namespace App\Livewire\Project\New;
+
+use App\Models\Application;
+use App\Models\GithubApp;
+use App\Models\Project;
+use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+use Livewire\Component;
+use Visus\Cuid2\Cuid2;
+
+class SimpleDockerfile extends Component
+{
+    use AuthorizesRequests;
+
+    public string $dockerfile = '';
+
+    public array $parameters;
+
+    public array $query;
+
+    public function mount()
+    {
+        $this->parameters = get_route_parameters();
+        $this->query = request()->query();
+        if (isDev()) {
+            $this->dockerfile = 'FROM nginx
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]
+';
+        }
+    }
+
+    public function submit()
+    {
+        $this->validate([
+            'dockerfile' => 'required',
+        ]);
+        $destination_uuid = $this->query['destination'] ?? null;
+        $destination = find_destination_for_current_team($destination_uuid);
+        if (! $destination) {
+            throw new \Exception('Destination not found.');
+        }
+        $destination_class = $destination->getMorphClass();
+
+        $project = Project::ownedByCurrentTeam()->where('uuid', $this->parameters['project_uuid'])->firstOrFail();
+        $environment = $project->environments()->where('uuid', $this->parameters['environment_uuid'])->firstOrFail();
+
+        // [CORELIX ENHANCED: authorize web application creation against granular permissions]
+        $this->authorize('create', Application::class);
+
+        $port = get_port_from_dockerfile($this->dockerfile);
+        if (! $port) {
+            $port = 80;
+        }
+        $application = Application::create([
+            'name' => 'dockerfile-'.new Cuid2,
+            'repository_project_id' => 0,
+            'git_repository' => 'coollabsio/coolify',
+            'git_branch' => 'main',
+            'build_pack' => 'dockerfile',
+            'dockerfile' => $this->dockerfile,
+            'ports_exposes' => $port,
+            'environment_id' => $environment->id,
+            'destination_id' => $destination->id,
+            'destination_type' => $destination_class,
+            'health_check_enabled' => false,
+            'source_id' => 0,
+            'source_type' => GithubApp::class,
+        ]);
+
+        $fqdn = generateUrl(server: $destination->server, random: $application->uuid);
+        $application->update([
+            'name' => 'dockerfile-'.$application->uuid,
+            'fqdn' => $fqdn,
+        ]);
+
+        $application->parseHealthcheckFromDockerfile(dockerfile: $this->dockerfile, isInit: true);
+
+        return redirect()->route('project.application.configuration', [
+            'application_uuid' => $application->uuid,
+            'environment_uuid' => $environment->uuid,
+            'project_uuid' => $project->uuid,
+        ]);
+    }
+}

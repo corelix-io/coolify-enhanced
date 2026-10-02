@@ -1,0 +1,71 @@
+# overlays.lock — upstream blob SHA manifest for Corelix overlay files.
+#
+# Format (space-separated):
+#   <our-overlay-path>  <upstream-path-in-coolify>  <blob-sha-at-pinned-version>
+#
+# Pinned to Coolify v4.3.23.
+#
+# PURPOSE
+# -------
+# CI reads COOLIFY_VERSION from docker/Dockerfile, fetches upstream files at that tag,
+# computes their blob SHAs, and compares against this file.  If any SHA differs the
+# overlay is STALE and must be reviewed before the PR can merge.
+#
+# WORKFLOW
+# --------
+# When bumping COOLIFY_VERSION:
+#   1. Update the version in docker/Dockerfile and .github/workflows/*.yml
+#   2. Run: scripts/check-overlay-parity.sh          # shows stale + missing functions
+#   3. Update each stale overlay to be compatible with the new upstream version
+#   4. Run: scripts/check-overlay-parity.sh --update-lock  # refreshes SHAs below
+#   5. Commit Dockerfile + CI files + overlays + this lock in one PR
+#
+# Never edit SHAs by hand — use --update-lock.
+# Add a new row when you add a new overlay file that has an upstream counterpart.
+
+# ── Helpers (full-file overlays — function parity is also enforced) ──────────
+src/Overrides/Helpers/constants.php                                         bootstrap/helpers/constants.php                                             79049e8c711ffe132f7a97343f4632ba20bcfdf1
+src/Overrides/Helpers/databases.php                                         bootstrap/helpers/databases.php                                             03a2e4fa3df18ec9f71723db9c063f62fd39ec6a
+src/Overrides/Helpers/docker.php                                            bootstrap/helpers/docker.php                                                02dee81b7079e2d4a96a8995feaef19bc58816ca
+src/Overrides/Helpers/proxy.php                                             bootstrap/helpers/proxy.php                                                 fe639950bef1f5f1e12e9ac28de7d75e96408018
+src/Overrides/Helpers/shared.php                                            bootstrap/helpers/shared.php                                                79dddd59acdb98ee1b2325c519295368d4d3da4e
+
+# ── PHP classes ──────────────────────────────────────────────────────────────
+src/Overrides/Actions/Database/StartDatabaseProxy.php                       app/Actions/Database/StartDatabaseProxy.php                                 1061394e61d57ebf5b88a63450265954fca94f0d
+src/Overrides/Enums/BuildPackTypes.php                                      app/Enums/BuildPackTypes.php                                                eee898823d50c521893fbb0d8ae68d9c8a4fb173
+src/Overrides/Jobs/ApplicationDeploymentJob.php                             app/Jobs/ApplicationDeploymentJob.php                                       99ff1ac874de92867d29795fdc8a0c69b5abc9ff
+src/Overrides/Jobs/DatabaseBackupJob.php                                    app/Jobs/DatabaseBackupJob.php                                              3bc86df903d3d19a8176b792b91aeec0942f4eb7
+src/Overrides/Livewire/Project/Database/ImportForm.php                      app/Livewire/Project/Database/ImportForm.php                                2d5874655464de4bfa04a50cdf60c1b56a20ce1c
+src/Overrides/Livewire/Project/New/DockerImage.php                          app/Livewire/Project/New/DockerImage.php                                    ab6063e09131a7bbebc2ca253c1a954645b55aa3
+src/Overrides/Livewire/Project/New/GithubPrivateRepository.php              app/Livewire/Project/New/GithubPrivateRepository.php                        cef0cf6ac799f537c7b37a26d3d215f334a1c0d5
+src/Overrides/Livewire/Project/New/GithubPrivateRepositoryDeployKey.php     app/Livewire/Project/New/GithubPrivateRepositoryDeployKey.php               98c5395bfdd33c084c4ef23516c3eae7df61efa7
+src/Overrides/Livewire/Project/New/PublicGitRepository.php                  app/Livewire/Project/New/PublicGitRepository.php                            a031c50c00c8a292d8989b5c329df77fe78fff8b
+src/Overrides/Livewire/Project/New/SimpleDockerfile.php                     app/Livewire/Project/New/SimpleDockerfile.php                               24f21b4cb547cf0a51fa8d4344476967ddf2f877
+src/Overrides/Livewire/Project/Resource/Create.php                          app/Livewire/Project/Resource/Create.php                                    19ffad55c792f89fd7dbf67b4fbd7245be54c94c
+src/Overrides/Livewire/Project/Service/Index.php                            app/Livewire/Project/Service/Index.php                                      f4b6bec2d4b8976efc2a8406a1cac10316f5167a
+src/Overrides/Models/ServiceDatabase.php                                    app/Models/ServiceDatabase.php                                              603d11a7f39d0eae1a16241128767729db69a887
+
+# ── Blade views ──────────────────────────────────────────────────────────────
+src/Overrides/Views/components/applications/links.blade.php                 resources/views/components/applications/links.blade.php                     761d88fedef7f827225173827fcf6e7a4587a4f9
+src/Overrides/Views/components/navbar.blade.php                             resources/views/components/navbar.blade.php                                 153727e46d694b67b6c0a849fe79d1bc04e528ee
+src/Overrides/Views/components/server/sidebar.blade.php                     resources/views/components/server/sidebar.blade.php                         4b652bd51b6de3fc563f3a84daa7e45a3d46486b
+src/Overrides/Views/components/services/links.blade.php                     resources/views/components/services/links.blade.php                         32de3af618e9bca23c59b2dfa4ee552e10b0d47e
+src/Overrides/Views/components/settings/navbar.blade.php                    resources/views/components/settings/navbar.blade.php                        79b333ca3edd1f657e45f244e85da8e97ab063e5
+src/Overrides/Views/components/settings/layout.blade.php                    resources/views/components/settings/layout.blade.php                        6b703757123dcd3572dfd30235f7c0fb14bb6d38
+src/Overrides/Views/components/application/configuration-sidebar.blade.php  resources/views/components/application/configuration-sidebar.blade.php      5ac9f1f3dcc5f5103c5756de3187a289157ba7d2
+src/Overrides/Views/components/database/configuration-sidebar.blade.php     resources/views/components/database/configuration-sidebar.blade.php         2c62641f850ec9ceccc717c0db1caf2a78c49567
+src/Overrides/Views/layouts/app.blade.php                                   resources/views/layouts/app.blade.php                                       5acd2d1887d4e5577a53a974b34bd640189aa264
+src/Overrides/Views/layouts/base.blade.php                                  resources/views/layouts/base.blade.php                                      ffeefb587f406d49d7001875ea98845c4a0b70b5
+src/Overrides/Views/livewire/profile/appearance.blade.php                   resources/views/livewire/profile/appearance.blade.php                       ef29f7265366ed93a8aae43d95008e36dfd5f444
+src/Overrides/Views/livewire/project/application/configuration.blade.php    resources/views/livewire/project/application/configuration.blade.php        41127287c419b0e4bdc85fa1988eca2a200ae313
+src/Overrides/Views/livewire/project/application/general.blade.php          resources/views/livewire/project/application/general.blade.php              65d806fca941828d89d9e07af641c7cbb758c0e3
+src/Overrides/Views/livewire/project/application/swarm.blade.php            resources/views/livewire/project/application/swarm.blade.php                6bd593b9335caa001211c4af3834db05bc68ced6
+src/Overrides/Views/livewire/project/database/configuration.blade.php       resources/views/livewire/project/database/configuration.blade.php           fb32c18ba4ca4b5361673a32d707946962c2ed01
+src/Overrides/Views/livewire/project/new/github-private-repository-deploy-key.blade.php resources/views/livewire/project/new/github-private-repository-deploy-key.blade.php b0dc41bb4df5d4fad7b2cec1aff2573264f21a9c
+src/Overrides/Views/livewire/project/new/github-private-repository.blade.php resources/views/livewire/project/new/github-private-repository.blade.php    26aaf3530f3b2b4c4857daf1fc53582dcaca097c
+src/Overrides/Views/livewire/project/new/public-git-repository.blade.php    resources/views/livewire/project/new/public-git-repository.blade.php        137d880eeddd34069329702e162d1d8dea71c737
+src/Overrides/Views/livewire/project/new/select.blade.php                   resources/views/livewire/project/new/select.blade.php                       b361a543ae796d46f1e422648a24fe67e4d1a55a
+src/Overrides/Views/livewire/project/service/configuration.blade.php        resources/views/livewire/project/service/configuration.blade.php            e88c5bc2f2b8b37aecedff76b9a6d5a53c2172f5
+src/Overrides/Views/livewire/project/service/index.blade.php                resources/views/livewire/project/service/index.blade.php                    268eaae499f2e20a022d6baea93c1a59910d3ffa
+src/Overrides/Views/livewire/settings-backup.blade.php                      resources/views/livewire/settings-backup.blade.php                          c89bf148cf72ffa4f1ade1aac4f44d625d5cf52b
+src/Overrides/Views/livewire/storage/show.blade.php                         resources/views/livewire/storage/show.blade.php                             a7cf356d11757d5b59cca1cc1c959729be5f76b0
