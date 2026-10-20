@@ -1,0 +1,67 @@
+{
+    "name": "corelix-io/platform",
+    "version": "1.0.0",
+    "description": "Corelix Platform — pro-grade Coolify v4 extension with granular permissions, encrypted backups, cluster management, and more",
+    "type": "library",
+    "license": "MIT",
+    "keywords": [
+        "coolify",
+        "permissions",
+        "access-control",
+        "rbac",
+        "backup-encryption",
+        "rclone",
+        "s3",
+        "laravel"
+    ],
+    "authors": [
+        {
+            "name": "Corelix.io",
+            "email": "team@corelix.io"
+        }
+    ],
+    "homepage": "https://github.com/corelix-io/platform",
+    "support": {
+        "docs": "https://github.com/corelix-io/platform",
+        "issues": "https://github.com/corelix-io/platform/issues",
+        "source": "https://github.com/corelix-io/platform"
+    },
+    "autoload": {
+        "psr-4": {
+            "CorelixIo\\Platform\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "CorelixIo\\Platform\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "CorelixIo\\Platform\\CorelixPlatformServiceProvider"
+            ]
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true,
+    "require": {
+        "php": "^8.2",
+        "illuminate/support": "^11.0|^12.0",
+        "illuminate/database": "^11.0|^12.0",
+        "livewire/livewire": "^3.0"
+    },
+    "require-dev": {
+        "orchestra/testbench": "^9.0",
+        "pestphp/pest": "^2.0"
+    },
+    "scripts": {
+        "test": "pest"
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        }
+    }
+}

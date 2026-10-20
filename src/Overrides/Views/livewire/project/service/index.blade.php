@@ -1,0 +1,416 @@
+<div>
+    @unless ($embedded)
+        <livewire:project.service.heading :service="$service" :parameters="$parameters" :query="$query" />
+    @endunless
+    <section @class(['application-settings-workspace mt-4 w-full max-w-none lg:mt-0' => ! $embedded])>
+        <div @class(['grid min-w-0 gap-8 xl:grid-cols-[210px_minmax(0,1fr)] xl:gap-8' => ! $embedded])>
+        @if (! $embedded && $resourceType === 'database')
+            <x-service-database.sidebar :parameters="$parameters" :serviceDatabase="$serviceDatabase" />
+        @elseif (! $embedded)
+            <aside class="application-settings-navigation min-w-0 xl:self-start">
+                <nav aria-label="Compose resource settings"
+                    class="grid grid-cols-2 gap-0.5 border-y border-neutral-200 py-3 sm:grid-cols-3 xl:grid-cols-1 xl:border-y-0 xl:py-0 dark:border-white/[0.06]">
+                    <div class="nav-section hidden xl:block">Compose resource</div>
+                <a class="menu-item" {{ wireNavigate() }}
+                    href="{{ route('project.service.configuration', [...$parameters, 'stack_service_uuid' => null]) }}">
+                    <x-reicon name="logout" class="menu-item-icon rotate-180" />
+                    <span class="menu-item-label">Back to service</span>
+                </a>
+                <a @class(['menu-item', 'menu-item-active' => request()->routeIs('project.service.index')])
+                    {{ wireNavigate() }} href="{{ route('project.service.index', $parameters) }}">
+                    <x-reicon name="settings" class="menu-item-icon" />
+                    <span class="menu-item-label">General</span>
+                </a>
+                {{-- Corelix Enhanced: Advanced nav item for Traefik label overrides --}}
+                <a @class(['menu-item', 'menu-item-active' => request()->routeIs('project.service.index.advanced')])
+                    {{ wireNavigate() }} href="{{ route('project.service.index.advanced', $parameters) }}">
+                    <x-reicon name="grid" class="menu-item-icon" />
+                    <span class="menu-item-label">Advanced</span>
+                </a>
+                {{-- End Corelix Enhanced --}}
+                </nav>
+            </aside>
+        @endif
+        <div class="min-w-0">
+            @if ($resourceType === 'application')
+                @unless ($embedded)
+                    <x-slot:title>
+                        {{ data_get_str($service, 'name')->limit(10) }} >
+                        {{ data_get_str($serviceApplication, 'name')->limit(10) }} | Coolify
+                    </x-slot>
+                @endunless
+                {{-- Corelix Enhanced: Advanced route with Traefik label overrides (Pro) --}}
+                @if ($currentRoute === 'project.service.index.advanced')
+                    <div class="space-y-6">
+                        <div>
+                            <h2 class="text-base font-semibold text-black dark:text-fg">Advanced</h2>
+                            <p class="mt-1 text-sm text-neutral-500 dark:text-fg-dim">
+                                Advanced settings for {{ Str::headline($serviceApplication->name) }}.
+                            </p>
+                        </div>
+                        <div class="application-settings-section">
+                            <div class="application-settings-section-body flex flex-col gap-3">
+                                @if (str($serviceApplication->image)->contains('pocketbase'))
+                                    <x-forms.checkbox canGate="update" :canResource="$serviceApplication" instantSave="instantSaveApplicationSettings" id="isGzipEnabled"
+                                        label="Enable Gzip Compression"
+                                        helper="Pocketbase does not need gzip compression, otherwise SSE will not work." disabled />
+                                @else
+                                    <x-forms.checkbox canGate="update" :canResource="$serviceApplication" instantSave="instantSaveApplicationSettings" id="isGzipEnabled"
+                                        label="Enable Gzip Compression"
+                                        helper="You can disable gzip compression if you want. Some services are compressing data by default. In this case, you do not need this." />
+                                @endif
+                                <x-forms.checkbox canGate="update" :canResource="$serviceApplication" instantSave="instantSaveApplicationSettings" id="isStripprefixEnabled"
+                                    label="Strip Prefixes"
+                                    helper="Strip Prefix is used to remove prefixes from paths. Like /api/ to /api." />
+                                <x-forms.checkbox canGate="update" :canResource="$serviceApplication" instantSave="instantSaveApplicationSettings" label="Exclude from service status"
+                                    helper="If you do not need to monitor this resource, enable. Useful if this service is optional."
+                                    id="excludeFromStatus"></x-forms.checkbox>
+                                <x-forms.checkbox canGate="update" :canResource="$service"
+                                    helper="Drain logs to your configured log drain endpoint in your Server settings."
+                                    instantSave="instantSaveApplicationAdvanced" id="isLogDrainEnabled" label="Drain Logs" />
+                            </div>
+                        </div>
+
+                        @feature('TRAEFIK_LABEL_OVERRIDES')
+                        @else
+                            <div class="application-settings-section">
+                                @include('corelix-platform::components.upsell-card', ['feature' => 'TRAEFIK_LABEL_OVERRIDES'])
+                            </div>
+                        @endfeature
+                    </div>
+                @else
+                {{-- End Corelix Enhanced --}}
+                    <form wire:submit="submitApplication" class="space-y-6">
+                        <div class="space-y-4">
+                            <div class="grid gap-4 sm:grid-cols-2">
+                                <x-forms.input canGate="update" :canResource="$serviceApplication" label="Name" id="humanName"
+                                    placeholder="Human readable name"></x-forms.input>
+                                <x-forms.input canGate="update" :canResource="$serviceApplication" label="Description"
+                                    id="description"></x-forms.input>
+                            </div>
+                            <div class="grid gap-4 sm:grid-cols-2">
+                                @if (!$serviceApplication->serviceType()?->contains(str($serviceApplication->image)->before(':')))
+                                    <div data-domain-summary
+                                        class="rounded-lg border border-neutral-200 p-4 dark:border-white/[0.08]">
+                                        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                            <p class="text-sm text-neutral-500 dark:text-fg-dim">
+                                                @php($domainCount = countDomains($fqdn))
+                                                @if ($domainCount === 0)
+                                                    No domains set.
+                                                @elseif ($domainCount === 1)
+                                                    1 domain set.
+                                                @else
+                                                    {{ $domainCount }} domains set.
+                                                @endif
+                                            </p>
+                                            <a class="button shrink-0" href="{{ route('project.service.domains', $parameters) }}"
+                                                {{ wireNavigate() }}>
+                                                <x-reicon name="globe" class="size-4" />
+                                                Manage domains
+                                            </a>
+                                        </div>
+                                    </div>
+                                @endif
+                                <x-forms.input canGate="update" :canResource="$serviceApplication"
+                                    helper="You can change the image you would like to deploy.<br><br><span class='dark:text-warning'>WARNING. You could corrupt your data. Only do it if you know what you are doing.</span>"
+                                    label="Image" id="image"></x-forms.input>
+                            </div>
+                        </div>
+
+                        @include('livewire.project.service.advanced-settings')
+
+                        <div data-service-resource-actions
+                            class="flex flex-wrap items-center justify-between gap-3 border-t border-neutral-200 pt-5 dark:border-white/[0.08]">
+                            <div>
+                                @can('delete', $serviceApplication)
+                                    <x-modal-confirmation title="Confirm Service Application Deletion?" buttonTitle="Delete"
+                                        isErrorButton submitAction="deleteApplication"
+                                        :actions="['The selected service application container will be stopped and permanently deleted.']"
+                                        confirmationText="{{ Str::headline($serviceApplication->name) }}"
+                                        confirmationLabel="Please confirm the execution of the actions by entering the Service Application Name below"
+                                        shortConfirmationLabel="Service Application Name" />
+                                @endcan
+                            </div>
+                            <div class="ml-auto flex items-center gap-2">
+                                @can('update', $serviceApplication)
+                                    <x-modal-confirmation wire:click="convertToDatabase" title="Convert to Database"
+                                        buttonTitle="Convert to Database" submitAction="convertToDatabase"
+                                        :actions="['The selected resource will be converted to a service database.']"
+                                        confirmationText="{{ Str::headline($serviceApplication->name) }}"
+                                        confirmationLabel="Please confirm the execution of the actions by entering the Service Application Name below"
+                                        shortConfirmationLabel="Service Application Name" />
+                                    <x-forms.button type="submit" isHighlighted>Save changes</x-forms.button>
+                                @endcan
+                            </div>
+                        </div>
+                    </form>
+
+                    <x-domain-conflict-modal
+                        :conflicts="$domainConflicts"
+                        :showModal="$showDomainConflictModal"
+                        confirmAction="confirmDomainUsage">
+                        <x-slot:consequences>
+                            <ul class="mt-2 ml-4 list-disc">
+                                <li>Only one service will be accessible at this domain</li>
+                                <li>The routing behavior will be unpredictable</li>
+                                <li>You may experience service disruptions</li>
+                                <li>SSL certificates might not work correctly</li>
+                            </ul>
+                        </x-slot:consequences>
+                    </x-domain-conflict-modal>
+
+                    @if ($showPortWarningModal)
+                        <div x-data="{ modalOpen: true }" x-init="$nextTick(() => { modalOpen = true })"
+                            @keydown.escape.window="modalOpen = false; $wire.call('cancelRemovePort')"
+                            :class="{ 'z-40': modalOpen }" class="relative">
+                            <template x-teleport="body">
+                                <div x-show="modalOpen"
+                                    class="fixed inset-0 z-99 flex min-h-full items-center justify-center overflow-y-auto p-4" x-cloak>
+                                    <div x-show="modalOpen" class="absolute inset-0 bg-black/50 backdrop-blur-[2px]"></div>
+                                    <div x-show="modalOpen" x-trap.inert.noscroll="modalOpen" x-transition:enter="ease-out duration-100"
+                                        x-transition:enter-start="opacity-0 -translate-y-2 sm:scale-95"
+                                        x-transition:enter-end="opacity-100 translate-y-0 sm:scale-100"
+                                        x-transition:leave="ease-in duration-100"
+                                        x-transition:leave-start="opacity-100 translate-y-0 sm:scale-100"
+                                        x-transition:leave-end="opacity-0 -translate-y-2 sm:scale-95"
+                                        class="application-settings-form application-settings-section relative w-full lg:min-w-[36rem] lg:max-w-2xl"
+                                        style="box-shadow: 0 0 0 1px var(--coollabs-hairline), var(--shadow-modal)">
+                                        <header>
+                                            <h3>Use a different port?</h3>
+                                            <button @click="modalOpen = false; $wire.call('cancelRemovePort')"
+                                                class="flex size-7 items-center justify-center rounded-md text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-black dark:text-fg-faint dark:hover:bg-white/[0.06] dark:hover:text-fg">
+                                                <x-reicon name="x" class="size-4" />
+                                            </button>
+                                        </header>
+                                        <div class="application-settings-section-body">
+                                            <x-callout type="warning" title="Port requirement" class="mb-4">
+                                                This service requires port <strong>{{ $requiredPort }}</strong> to function correctly.
+                                                One or more of your domains use a different port, or none.
+                                            </x-callout>
+
+                                            <x-callout type="danger" title="What will happen if you continue?" class="mb-4">
+                                                <ul class="mt-2 ml-4 list-disc">
+                                                    <li>The service may become unreachable</li>
+                                                    <li>The proxy may not be able to route traffic correctly</li>
+                                                    <li>Environment variables may not be generated properly</li>
+                                                    <li>The service may fail to start or function</li>
+                                                </ul>
+                                            </x-callout>
+
+                                            <div class="mt-4 flex flex-wrap justify-end gap-2 border-t border-neutral-200 pt-4 dark:border-white/[0.08]">
+                                                <x-forms.button @click="modalOpen = false; $wire.call('cancelRemovePort')"
+                                                    class="w-auto">
+                                                    Keep required port
+                                                </x-forms.button>
+                                                <x-forms.button wire:click="confirmRemovePort" @click="modalOpen = false" class="w-auto"
+                                                    isError>
+                                                    Use this port anyway
+                                                </x-forms.button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    @endif
+                @endif
+            @elseif ($resourceType === 'database')
+                @unless ($embedded)
+                    <x-slot:title>
+                        {{ data_get_str($service, 'name')->limit(10) }} >
+                        {{ data_get_str($serviceDatabase, 'name')->limit(10) }} | Coolify
+                    </x-slot>
+                @endunless
+                @if ($currentRoute === 'project.service.database.import')
+                    <livewire:project.database.import :resource="$serviceDatabase" :key="'import-' . $serviceDatabase->uuid" />
+                {{-- Corelix Enhanced: Advanced route for database Traefik label overrides (Pro) --}}
+                @elseif ($currentRoute === 'project.service.index.advanced')
+                    <div class="space-y-6">
+                        <div>
+                            <h2 class="text-base font-semibold text-black dark:text-fg">Advanced</h2>
+                            <p class="mt-1 text-sm text-neutral-500 dark:text-fg-dim">
+                                Advanced settings for {{ Str::headline($serviceDatabase->name) }}.
+                            </p>
+                        </div>
+                        <div class="application-settings-section">
+                            <div class="application-settings-section-body flex flex-col gap-3">
+                                <x-forms.checkbox canGate="update" :canResource="$serviceDatabase" instantSave="instantSaveExclude"
+                                    label="Exclude from service status"
+                                    helper="If you do not need to monitor this resource, enable. Useful if this service is optional."
+                                    id="excludeFromStatus"></x-forms.checkbox>
+                                <x-forms.checkbox canGate="update" :canResource="$service"
+                                    helper="Drain logs to your configured log drain endpoint in your Server settings."
+                                    instantSave="instantSaveLogDrain" id="isLogDrainEnabled" label="Drain Logs" />
+                            </div>
+                        </div>
+
+                        @feature('TRAEFIK_LABEL_OVERRIDES')
+                        @else
+                            <div class="application-settings-section">
+                                @include('corelix-platform::components.upsell-card', ['feature' => 'TRAEFIK_LABEL_OVERRIDES'])
+                            </div>
+                        @endfeature
+                    </div>
+                {{-- End Corelix Enhanced --}}
+                @else
+                    <form wire:submit="submitDatabase" class="space-y-6">
+                        <div class="space-y-5">
+                            <div class="grid gap-4 sm:grid-cols-2">
+                                <x-forms.input canGate="update" :canResource="$serviceDatabase" label="Name" id="humanName"
+                                    placeholder="Name"></x-forms.input>
+                                <x-forms.input canGate="update" :canResource="$serviceDatabase" label="Description"
+                                    id="description"></x-forms.input>
+                                <x-forms.input class="sm:col-span-2" canGate="update" :canResource="$serviceDatabase" required
+                                    helper="You can change the image you would like to deploy.<br><br><span class='dark:text-warning'>WARNING. You could corrupt your data. Only do it if you know what you are doing.</span>"
+                                    label="Image" id="image"></x-forms.input>
+                            </div>
+                            {{-- Corelix Enhanced: Multi-port proxy overlay --}}
+                            @if ($hasMultiPortProxy)
+                                <div class="border-t border-neutral-200 pt-5 dark:border-white/[0.06]">
+                                    <div class="mb-4 flex items-center justify-between gap-2">
+                                        <h3 class="text-sm font-semibold text-black dark:text-fg">Public access</h3>
+                                        <div class="flex items-center gap-2">
+                                            <x-loading wire:loading wire:target="instantSave,updateProxyPorts" />
+                                            @if ($serviceDatabase->is_public)
+                                                <x-process-dialog closeWithX size="xl">
+                                                    <x-slot:title>Proxy Logs</x-slot:title>
+                                                    <x-slot:content>
+                                                        <livewire:project.shared.get-logs :server="$server" :resource="$service"
+                                                            :servicesubtype="$serviceDatabase" container="{{ $serviceDatabase->uuid }}-proxy" :collapsible="false" lazy />
+                                                    </x-slot:content>
+                                                    <x-forms.button @click="processDialogOpen = true">Logs</x-forms.button>
+                                                </x-process-dialog>
+                                            @endif
+                                        </div>
+                                    </div>
+                                    <div class="space-y-4">
+                                        <x-forms.checkbox canGate="update" :canResource="$serviceDatabase" instantSave id="isPublic"
+                                            label="Make it publicly available" />
+                                        <div>
+                                            <h4 class="mb-2 text-sm font-medium text-black dark:text-fg">Port Mappings</h4>
+                                            <p class="mb-3 text-xs text-neutral-500 dark:text-fg-dim">Configure which ports to expose publicly.</p>
+                                            <div class="space-y-3">
+                                                @foreach ($proxyPorts as $internalPort => $config)
+                                                    <div class="flex flex-col gap-2 sm:flex-row sm:items-end">
+                                                        <div class="w-full sm:max-w-xs">
+                                                            <x-forms.checkbox
+                                                                wire:model.live="proxyPorts.{{ $internalPort }}.enabled"
+                                                                wire:change="updateProxyPorts"
+                                                                label="{{ $config['label'] ?? 'port' }} ({{ $internalPort }})"
+                                                                :disabled="$serviceDatabase->is_public" />
+                                                        </div>
+                                                        <div class="w-full sm:max-w-xs">
+                                                            <x-forms.input
+                                                                wire:model.blur="proxyPorts.{{ $internalPort }}.public_port"
+                                                                placeholder="{{ $internalPort }}"
+                                                                label="Public Port"
+                                                                type="number"
+                                                                :disabled="$serviceDatabase->is_public" />
+                                                        </div>
+                                                    </div>
+                                                @endforeach
+                                            </div>
+                                        </div>
+                                        @if ($serviceDatabase->is_public)
+                                            @php $urls = $serviceDatabase->getServiceDatabaseUrls(); @endphp
+                                            @foreach ($urls as $urlInfo)
+                                                <x-forms.input
+                                                    label="{{ $urlInfo['label'] }} ({{ $urlInfo['internal_port'] }})"
+                                                    helper="Your credentials are available in your environment variables."
+                                                    type="password"
+                                                    readonly
+                                                    value="{{ $urlInfo['url'] }}" />
+                                            @endforeach
+                                        @endif
+                                    </div>
+                                </div>
+                            @else
+                            {{-- End Corelix Enhanced --}}
+                            <div class="border-t border-neutral-200 pt-5 dark:border-white/[0.06]">
+                                <div class="mb-4 flex items-center justify-between gap-2">
+                                    <h3 class="text-sm font-semibold text-black dark:text-fg">Public access</h3>
+                                    <div class="flex items-center gap-2">
+                                        <x-loading wire:loading wire:target="instantSave" />
+                                        @if ($serviceDatabase->is_public)
+                                            <x-process-dialog closeWithX size="xl">
+                                                <x-slot:title>Proxy Logs</x-slot:title>
+                                                <x-slot:content>
+                                                    <livewire:project.shared.get-logs :server="$server" :resource="$service"
+                                                        :servicesubtype="$serviceDatabase" container="{{ $serviceDatabase->uuid }}-proxy" :collapsible="false" lazy />
+                                                </x-slot:content>
+                                                <x-forms.button @click="processDialogOpen = true">Logs</x-forms.button>
+                                            </x-process-dialog>
+                                        @endif
+                                    </div>
+                                </div>
+                                <div class="space-y-4">
+                                    <div class="flex flex-col gap-2 sm:flex-row sm:items-end"
+                                        x-data="{ port: @js(filled($publicPort) ? (string) $publicPort : '') }"
+                                        @input="if ($event.target.matches('input[type=number], input:not([type])')) port = $event.target.value">
+                                        <div class="w-full sm:max-w-xs">
+                                            <x-forms.input type="number" canGate="update" :canResource="$serviceDatabase"
+                                                placeholder="5432" disabled="{{ $isPublic }}" id="publicPort"
+                                                label="Public Port" />
+                                        </div>
+                                        <div class="flex shrink-0 flex-wrap items-center gap-2">
+                                            @if ($isPublic)
+                                                <x-status-badge status="Public" type="success" />
+                                                <x-forms.button canGate="update" :canResource="$serviceDatabase"
+                                                    wire:click="disablePublicAccess">
+                                                    Make private
+                                                </x-forms.button>
+                                            @else
+                                                {{-- Do not nest @if/@endif inside an <x-*> opening tag: Blade component
+                                                     compilation breaks and yields "unexpected token endif". --}}
+                                                <x-forms.button canGate="update" :canResource="$serviceDatabase"
+                                                    wire:click="enablePublicAccess"
+                                                    x-bind:disabled="!String(port ?? '').trim()">
+                                                    Make publicly available
+                                                </x-forms.button>
+                                            @endif
+                                        </div>
+                                    </div>
+                                    @if ($db_url_public)
+                                        <x-forms.input label="Database IP:PORT (public)"
+                                            helper="Your credentials are available in your environment variables." type="password"
+                                            readonly wire:model="db_url_public" />
+                                    @endif
+                                </div>
+                            </div>
+                            @endif {{-- Corelix Enhanced: end multi-port proxy branching --}}
+                        </div>
+
+                        @include('livewire.project.service.advanced-settings')
+
+                        <div data-service-resource-actions
+                            class="flex flex-wrap items-center justify-between gap-3 border-t border-neutral-200 pt-5 dark:border-white/[0.08]">
+                            <div>
+                                @can('delete', $serviceDatabase)
+                                    <x-modal-confirmation title="Confirm Service Database Deletion?" buttonTitle="Delete"
+                                        isErrorButton submitAction="deleteDatabase" :actions="[
+                                            'The selected service database container will be stopped and permanently deleted.',
+                                        ]"
+                                        confirmationText="{{ Str::headline($serviceDatabase->name) }}"
+                                        confirmationLabel="Please confirm the execution of the actions by entering the Service Database Name below"
+                                        shortConfirmationLabel="Service Database Name" />
+                                @endcan
+                            </div>
+                            <div class="ml-auto flex items-center gap-2">
+                                @can('update', $serviceDatabase)
+                                    <x-modal-confirmation wire:click="convertToApplication" title="Convert to Application"
+                                        buttonTitle="Convert to Application" submitAction="convertToApplication"
+                                        :actions="['The selected resource will be converted to an application.']"
+                                        confirmationText="{{ Str::headline($serviceDatabase->name) }}"
+                                        confirmationLabel="Please confirm the execution of the actions by entering the Service Database Name below"
+                                        shortConfirmationLabel="Service Database Name" />
+                                    <x-forms.button type="submit" isHighlighted>Save changes</x-forms.button>
+                                @endcan
+                            </div>
+                        </div>
+                    </form>
+                @endif
+            @endif
+        </div>
+        </div>
+    </section>
+</div>
