@@ -1,0 +1,1072 @@
+<?php
+
+// =============================================================================
+// OVERLAY: Modified version of Coolify's Service/Index Livewire component
+// =============================================================================
+// Modifications:
+//   1. Multi-port proxy support via coolify.proxyPorts Docker label
+//   2. Traefik label overrides per service container (pro feature)
+// =============================================================================
+
+namespace App\Livewire\Project\Service;
+
+use App\Actions\Database\StartDatabaseProxy;
+use App\Actions\Database\StopDatabaseProxy;
+use App\Actions\Service\DeleteService;
+use App\Models\S3Storage;
+use App\Models\Server;
+use App\Models\Service;
+use App\Models\ServiceApplication;
+use App\Models\ServiceDatabase;
+use App\Services\Dns\ManagedDnsRecordCleanup;
+use App\Support\ValidationPatterns;
+use CorelixIo\Platform\Support\Feature;
+use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
+use Livewire\Component;
+use Symfony\Component\Yaml\Yaml;
+
+class Index extends Component
+{
+    use AuthorizesRequests;
+
+    public ?Service $service = null;
+
+    public ServiceApplication|ServiceDatabase|null $serviceApplication = null;
+
+    public ?ServiceDatabase $serviceDatabase = null;
+
+    public ?string $resourceType = null;
+
+    public ?string $currentRoute = null;
+
+    public bool $embedded = false;
+
+    public array $parameters;
+
+    public array $query;
+
+    public Collection $services;
+
+    public $s3s;
+
+    public ?Server $server = null;
+
+    // Database-specific properties
+    public ?string $db_url_public = null;
+
+    public $fileStorages;
+
+    public ?string $humanName = null;
+
+    public ?string $description = null;
+
+    public ?string $image = null;
+
+    public bool $excludeFromStatus = false;
+
+    public mixed $publicPort = null;
+
+    public mixed $publicPortTimeout = 3600;
+
+    public bool $isPublic = false;
+
+    public bool $isLogDrainEnabled = false;
+
+    // Application-specific properties
+    public $docker_cleanup = true;
+
+    public $delete_volumes = true;
+
+    public $domainConflicts = [];
+
+    public $showDomainConflictModal = false;
+
+    public $forceSaveDomains = false;
+
+    public $showPortWarningModal = false;
+
+    public $forceRemovePort = false;
+
+    public $requiredPort = null;
+
+    public ?string $fqdn = null;
+
+    public bool $isGzipEnabled = false;
+
+    public bool $isStripprefixEnabled = false;
+
+    public mixed $maxRestartCount = 0;
+
+    // [MULTI-PORT PROXY OVERLAY] — Multi-port proxy properties
+    public bool $isImportSupported = false;
+
+    public array $proxyPorts = [];
+
+    public array $availableProxyPorts = [];
+
+    public bool $hasMultiPortProxy = false;
+    // [END MULTI-PORT PROXY OVERLAY]
+
+    // [CORELIX ENHANCED: Traefik label overrides properties]
+    public string $labelOverridesYaml = '';
+
+    public string $labelOverridesError = '';
+
+    public array $generatedLabels = [];
+    // [END CORELIX ENHANCED: Traefik label overrides properties]
+
+    protected $listeners = ['generateDockerCompose', 'refreshScheduledBackups' => '$refresh', 'refreshFileStorages'];
+
+    protected $rules = [
+        'humanName' => 'nullable',
+        'description' => 'nullable',
+        'image' => 'required',
+        'excludeFromStatus' => 'required|boolean',
+        'publicPort' => 'nullable|integer|min:1|max:65535',
+        'publicPortTimeout' => 'nullable|integer|min:1',
+        'isPublic' => 'required|boolean',
+        'isLogDrainEnabled' => 'required|boolean',
+        'maxRestartCount' => 'integer|min:0',
+        // Application-specific rules
+        'fqdn' => 'nullable',
+        'isGzipEnabled' => 'nullable|boolean',
+        'isStripprefixEnabled' => 'nullable|boolean',
+    ];
+
+    public function mount(
+        ServiceApplication|ServiceDatabase|null $serviceApplication = null,
+        bool $embedded = false,
+    ) {
+        try {
+            $this->embedded = $embedded;
+            $this->services = collect([]);
+            if ($serviceApplication instanceof ServiceDatabase) {
+                $this->service = $serviceApplication->service;
+                $this->authorize('view', $this->service);
+                $this->parameters = [
+                    'project_uuid' => $this->service->environment->project->uuid,
+                    'environment_uuid' => $this->service->environment->uuid,
+                    'service_uuid' => $this->service->uuid,
+                    'stack_service_uuid' => $serviceApplication->uuid,
+                ];
+                $this->query = request()->query();
+                $this->currentRoute = 'project.service.index';
+                $this->serviceDatabase = $serviceApplication;
+                $this->serviceApplication = null;
+                $this->resourceType = 'database';
+                $this->initializeDatabaseProperties();
+                $this->s3s = $this->serviceTeamS3Storages();
+
+                return;
+            }
+            if ($serviceApplication) {
+                $this->service = $serviceApplication->service;
+                $this->authorize('view', $this->service);
+                $this->parameters = [
+                    'project_uuid' => $this->service->environment->project->uuid,
+                    'environment_uuid' => $this->service->environment->uuid,
+                    'service_uuid' => $this->service->uuid,
+                    'stack_service_uuid' => $serviceApplication->uuid,
+                ];
+                $this->query = request()->query();
+                $this->currentRoute = 'project.service.index';
+                $this->serviceApplication = $serviceApplication;
+                $this->resourceType = 'application';
+                $this->initializeApplicationProperties();
+                $this->s3s = $this->serviceTeamS3Storages();
+
+                return;
+            }
+            $this->parameters = get_route_parameters();
+            $this->query = request()->query();
+            $this->currentRoute = request()->route()->getName();
+            $project = currentTeam()
+                ->projects()
+                ->select('id', 'uuid', 'team_id')
+                ->where('uuid', $this->parameters['project_uuid'])
+                ->firstOrFail();
+            $environment = $project->environments()
+                ->select('id', 'uuid', 'name', 'project_id')
+                ->where('uuid', $this->parameters['environment_uuid'])
+                ->firstOrFail();
+            $this->service = $environment->services()->whereUuid($this->parameters['service_uuid'])->firstOrFail();
+            $this->authorize('view', $this->service);
+            if (in_array($this->currentRoute, ['project.service.index', 'project.service.index.advanced'], true)) {
+                return redirect()->route(
+                    'project.service.configuration',
+                    collect($this->parameters)->except('stack_service_uuid')->all(),
+                );
+            }
+            $service = $this->service->applications()->whereUuid($this->parameters['stack_service_uuid'])->first();
+            if ($service) {
+                $this->serviceApplication = $service;
+                $this->resourceType = 'application';
+                $this->serviceApplication->getFilesFromServer();
+                $this->initializeApplicationProperties();
+            } else {
+                $this->serviceDatabase = $this->service->databases()->whereUuid($this->parameters['stack_service_uuid'])->first();
+                if (! $this->serviceDatabase) {
+                    return redirect()->route('project.service.configuration', [
+                        'project_uuid' => $this->parameters['project_uuid'],
+                        'environment_uuid' => $this->parameters['environment_uuid'],
+                        'service_uuid' => $this->parameters['service_uuid'],
+                    ]);
+                }
+                $this->resourceType = 'database';
+                $this->serviceDatabase->getFilesFromServer();
+                $this->initializeDatabaseProperties();
+            }
+            $this->s3s = $this->serviceTeamS3Storages();
+        } catch (\Throwable $e) {
+            return handleError($e, $this);
+        }
+    }
+
+    private function serviceTeamS3Storages(): Collection
+    {
+        return S3Storage::query()
+            ->where('team_id', $this->service->team()->id)
+            ->where('is_usable', true)
+            ->get();
+    }
+
+    private function initializeDatabaseProperties(): void
+    {
+        $this->server = $this->serviceDatabase->service->destination->server;
+        if ($this->serviceDatabase->is_public) {
+            $this->db_url_public = $this->serviceDatabase->getServiceDatabaseUrl();
+        }
+        $this->refreshFileStorages();
+        $this->syncDatabaseData(false);
+
+        // [MULTI-PORT PROXY OVERLAY] — Import support + parse coolify.proxyPorts from compose
+        $dbType = $this->serviceDatabase->databaseType();
+        $supportedTypes = ['mysql', 'mariadb', 'postgres', 'mongo'];
+        $this->isImportSupported = collect($supportedTypes)->contains(fn ($type) => str_contains($dbType, $type));
+
+        $this->availableProxyPorts = $this->parseAvailableProxyPorts();
+        $this->hasMultiPortProxy = count($this->availableProxyPorts) > 0;
+
+        if ($this->hasMultiPortProxy) {
+            $this->proxyPorts = $this->serviceDatabase->proxy_ports ?? [];
+            foreach ($this->availableProxyPorts as $port => $info) {
+                if (! isset($this->proxyPorts[$port])) {
+                    $this->proxyPorts[$port] = [
+                        'public_port' => null,
+                        'label' => $info['label'],
+                        'enabled' => false,
+                    ];
+                }
+            }
+        }
+        // [END MULTI-PORT PROXY OVERLAY]
+
+        // [CORELIX ENHANCED: Traefik label overrides]
+        if (Feature::enabled('TRAEFIK_LABEL_OVERRIDES')) {
+            $this->initializeLabelOverrides(
+                model: $this->serviceDatabase,
+                containerName: $this->serviceDatabase->name
+            );
+        }
+        // [END CORELIX ENHANCED: Traefik label overrides]
+    }
+
+    // [MULTI-PORT PROXY OVERLAY] — Parse coolify.proxyPorts label from compose YAML
+    private function parseAvailableProxyPorts(): array
+    {
+        $service = $this->serviceDatabase->service;
+        if (! $service || ! $service->docker_compose_raw) {
+            return [];
+        }
+
+        try {
+            $compose = Yaml::parse($service->docker_compose_raw);
+        } catch (\Throwable $e) {
+            return [];
+        }
+
+        $serviceConfig = data_get($compose, "services.{$this->serviceDatabase->name}");
+        if (! $serviceConfig) {
+            return [];
+        }
+
+        $labels = data_get($serviceConfig, 'labels', []);
+        $proxyPortsValue = null;
+
+        if (is_array($labels)) {
+            foreach ($labels as $key => $value) {
+                // Map format: coolify.proxyPorts: "7687:bolt,7444:log"
+                if (is_string($key) && strtolower($key) === 'coolify.proxyports') {
+                    $proxyPortsValue = $value;
+                    break;
+                }
+                // Array format: - coolify.proxyPorts=7687:bolt,7444:log
+                if (is_string($value)) {
+                    $parts = explode('=', $value, 2);
+                    if (count($parts) === 2 && strtolower(trim($parts[0])) === 'coolify.proxyports') {
+                        $proxyPortsValue = trim($parts[1]);
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (! $proxyPortsValue) {
+            return [];
+        }
+
+        return ServiceDatabase::parseProxyPortsLabel($proxyPortsValue);
+    }
+    // [END MULTI-PORT PROXY OVERLAY]
+
+    private function syncDatabaseData(bool $toModel = false): void
+    {
+        if ($toModel) {
+            $this->serviceDatabase->human_name = $this->humanName;
+            $this->serviceDatabase->description = $this->description;
+            $this->serviceDatabase->image = $this->image;
+            $this->serviceDatabase->exclude_from_status = $this->excludeFromStatus;
+            $this->serviceDatabase->public_port = $this->publicPort ?: null;
+            $this->serviceDatabase->public_port_timeout = $this->publicPortTimeout ?: null;
+            $this->serviceDatabase->is_public = $this->isPublic;
+            $this->serviceDatabase->is_log_drain_enabled = $this->isLogDrainEnabled;
+        } else {
+            $this->humanName = $this->serviceDatabase->human_name;
+            $this->description = $this->serviceDatabase->description;
+            $this->image = $this->serviceDatabase->image;
+            $this->excludeFromStatus = $this->serviceDatabase->exclude_from_status ?? false;
+            $this->publicPort = $this->serviceDatabase->public_port;
+            $this->publicPortTimeout = $this->serviceDatabase->public_port_timeout;
+            $this->isPublic = $this->serviceDatabase->is_public ?? false;
+            $this->isLogDrainEnabled = $this->serviceDatabase->is_log_drain_enabled ?? false;
+        }
+    }
+
+    public function generateDockerCompose()
+    {
+        try {
+            $this->authorize('update', $this->service);
+            $this->service->parse();
+        } catch (\Throwable $e) {
+            return handleError($e, $this);
+        }
+    }
+
+    // Database-specific methods
+    public function refreshFileStorages()
+    {
+        if ($this->serviceDatabase) {
+            $this->fileStorages = $this->serviceDatabase->fileStorages()->get();
+        }
+    }
+
+    public function deleteDatabase($password, $selectedActions = [])
+    {
+        try {
+            $this->authorize('delete', $this->serviceDatabase);
+
+            if (! verifyPasswordConfirmation($password, $this)) {
+                return 'The provided password is incorrect.';
+            }
+
+            $containerRemoved = app(DeleteService::class)->removeSubresourceContainer($this->serviceDatabase);
+            $this->serviceDatabase->delete();
+            $this->auditServiceSubResource('deleted', $this->serviceDatabase, ['container_removed' => $containerRemoved]);
+            $containerRemoved
+                ? $this->dispatch('success', 'Database deleted.')
+                : $this->dispatch('warning', 'Database deleted from Coolify. The server does not respond, so its container is removed when the service starts again.');
+
+            return redirectRoute($this, 'project.service.configuration', $this->parameters);
+        } catch (\Throwable $e) {
+            return handleError($e, $this);
+        }
+    }
+
+    public function instantSaveExclude()
+    {
+        try {
+            $this->authorize('update', $this->serviceDatabase);
+            $this->submitDatabase();
+        } catch (\Throwable $e) {
+            return handleError($e, $this);
+        }
+    }
+
+    public function instantSaveLogDrain()
+    {
+        try {
+            $this->authorize('update', $this->serviceDatabase);
+            if (! $this->serviceDatabase->service->destination->server->isLogDrainEnabled()) {
+                $this->isLogDrainEnabled = false;
+                $this->dispatch('error', 'Log drain is not enabled on the server. Please enable it first.');
+
+                return;
+            }
+            $this->submitDatabase();
+            $this->dispatch('success', 'You need to restart the service for the changes to take effect.');
+        } catch (\Throwable $e) {
+            return handleError($e, $this);
+        }
+    }
+
+    public function convertToApplication()
+    {
+        try {
+            $this->authorize('update', $this->serviceDatabase);
+            $service = $this->serviceDatabase->service;
+            $serviceDatabase = $this->serviceDatabase;
+
+            // Check if application with same name already exists
+            if ($service->applications()->where('name', $serviceDatabase->name)->exists()) {
+                throw new \Exception('An application with this name already exists.');
+            }
+
+            // Create new parameters removing database_uuid
+            $redirectParams = collect($this->parameters)
+                ->except('database_uuid')
+                ->all();
+
+            $serviceApplication = DB::transaction(function () use ($service, $serviceDatabase) {
+                $serviceApplication = $service->applications()->create([
+                    'name' => $serviceDatabase->name,
+                    'human_name' => $serviceDatabase->human_name,
+                    'description' => $serviceDatabase->description,
+                    'exclude_from_status' => $serviceDatabase->exclude_from_status,
+                    'is_log_drain_enabled' => $serviceDatabase->is_log_drain_enabled,
+                    'image' => $serviceDatabase->image,
+                    'service_id' => $service->id,
+                    'is_migrated' => true,
+                ]);
+                $serviceDatabase->delete();
+
+                return $serviceApplication;
+            });
+            $this->auditServiceSubResource('converted_to_application', $serviceDatabase, [
+                'service_application_uuid' => $serviceApplication->uuid,
+            ]);
+
+            return redirectRoute($this, 'project.service.configuration', $redirectParams);
+        } catch (\Throwable $e) {
+            return handleError($e, $this);
+        }
+    }
+
+    public function enablePublicAccess(): void
+    {
+        $this->isPublic = true;
+        $this->instantSave();
+    }
+
+    public function disablePublicAccess(): void
+    {
+        $this->isPublic = false;
+        $this->instantSave();
+    }
+
+    public function instantSave()
+    {
+        $this->authorize('update', $this->serviceDatabase);
+
+        // [MULTI-PORT PROXY OVERLAY] — Use multi-port logic when available
+        if ($this->hasMultiPortProxy) {
+            return $this->instantSaveMultiPort();
+        }
+        // [END MULTI-PORT PROXY OVERLAY]
+
+        try {
+            if ($this->isPublic) {
+                if (! $this->publicPort) {
+                    $this->dispatch('error', 'Public port is required.');
+                    $this->isPublic = false;
+
+                    return;
+                }
+                if (! str($this->serviceDatabase->status)->startsWith('running')) {
+                    $this->dispatch('error', 'Database must be started to be publicly accessible.');
+                    $this->isPublic = false;
+
+                    return;
+                }
+                $this->persistPublicAccess();
+                StartDatabaseProxy::run($this->serviceDatabase);
+                $this->db_url_public = $this->serviceDatabase->getServiceDatabaseUrl();
+                $this->dispatch('success', 'Database is now publicly accessible.');
+            } else {
+                $this->persistPublicAccess();
+                StopDatabaseProxy::run($this->serviceDatabase);
+                $this->db_url_public = null;
+                $this->dispatch('success', 'Database is no longer publicly accessible.');
+            }
+        } catch (\Throwable $e) {
+            $this->isPublic = ! $this->isPublic;
+            $this->persistPublicAccess();
+
+            return handleError($e, $this);
+        }
+    }
+
+    private function persistPublicAccess(): void
+    {
+        $this->serviceDatabase->fill([
+            'is_public' => $this->isPublic,
+            'public_port' => $this->publicPort ?: null,
+            'public_port_timeout' => $this->publicPortTimeout ?: null,
+        ]);
+        $changedFields = auditChangedFields($this->serviceDatabase);
+        $this->serviceDatabase->save();
+        $this->auditServiceSubResourceUpdate($this->serviceDatabase, $changedFields, [
+            'is_public' => (bool) $this->serviceDatabase->is_public,
+            'public_port' => $this->serviceDatabase->public_port,
+        ]);
+    }
+
+    // [MULTI-PORT PROXY OVERLAY] — Handle multi-port proxy toggle
+    private function instantSaveMultiPort()
+    {
+        try {
+            if ($this->isPublic) {
+                // Validate: at least one port must be enabled with a public port set
+                $hasAnyEnabled = false;
+                foreach ($this->proxyPorts as $port => $config) {
+                    if ($config['enabled'] ?? false) {
+                        if (empty($config['public_port'])) {
+                            $label = $config['label'] ?? $port;
+                            $this->dispatch('error', "Public port is required for {$label} ({$port}).");
+                            $this->isPublic = false;
+
+                            return;
+                        }
+                        $hasAnyEnabled = true;
+                    }
+                }
+                if (! $hasAnyEnabled) {
+                    $this->dispatch('error', 'Enable at least one port mapping before making publicly available.');
+                    $this->isPublic = false;
+
+                    return;
+                }
+            }
+
+            $this->serviceDatabase->proxy_ports = $this->proxyPorts;
+            $this->serviceDatabase->is_public = $this->isPublic;
+            $this->serviceDatabase->save();
+
+            if ($this->isPublic) {
+                if (! str($this->serviceDatabase->status)->startsWith('running')) {
+                    $this->dispatch('error', 'Database must be started to be publicly accessible.');
+                    $this->isPublic = false;
+                    $this->serviceDatabase->is_public = false;
+                    $this->serviceDatabase->save();
+
+                    return;
+                }
+                StartDatabaseProxy::run($this->serviceDatabase);
+                $this->dispatch('success', 'Database is now publicly accessible.');
+            } else {
+                StopDatabaseProxy::run($this->serviceDatabase);
+                $this->dispatch('success', 'Database is no longer publicly accessible.');
+            }
+        } catch (\Throwable $e) {
+            // On failure, revert the toggle
+            $this->isPublic = ! $this->isPublic;
+            $this->serviceDatabase->is_public = $this->isPublic;
+            $this->serviceDatabase->save();
+
+            return handleError($e, $this);
+        }
+    }
+
+    public function updateProxyPorts()
+    {
+        try {
+            $this->authorize('update', $this->serviceDatabase);
+            $this->serviceDatabase->proxy_ports = $this->proxyPorts;
+            $this->serviceDatabase->save();
+
+            // If proxy is running, restart it with new port config
+            if ($this->serviceDatabase->is_public) {
+                StartDatabaseProxy::run($this->serviceDatabase);
+                $this->dispatch('success', 'Proxy port configuration updated.');
+            }
+        } catch (\Throwable $e) {
+            return handleError($e, $this);
+        }
+    }
+    // [END MULTI-PORT PROXY OVERLAY]
+
+    public function submitDatabase()
+    {
+        try {
+            $this->authorize('update', $this->serviceDatabase);
+            $this->validate();
+            $this->syncDatabaseData(true);
+            $changedFields = auditChangedFields($this->serviceDatabase);
+            $this->serviceDatabase->save();
+            $this->auditServiceSubResourceUpdate($this->serviceDatabase, $changedFields);
+            $this->serviceDatabase->refresh();
+            $this->syncDatabaseData(false);
+            updateCompose($this->serviceDatabase);
+            $this->dispatch('success', 'Database saved.');
+        } catch (\Throwable $e) {
+            return handleError($e, $this);
+        } finally {
+            $this->dispatch('generateDockerCompose');
+        }
+    }
+
+    // Application-specific methods
+    private function initializeApplicationProperties(): void
+    {
+        $this->requiredPort = $this->serviceApplication->getRequiredPort();
+        $this->syncApplicationData(false);
+
+        // [CORELIX ENHANCED: Traefik label overrides]
+        if (Feature::enabled('TRAEFIK_LABEL_OVERRIDES')) {
+            $this->initializeLabelOverrides(
+                model: $this->serviceApplication,
+                containerName: $this->serviceApplication->name
+            );
+        }
+        // [END CORELIX ENHANCED: Traefik label overrides]
+    }
+
+    private function syncApplicationData(bool $toModel = false): void
+    {
+        if ($toModel) {
+            $this->serviceApplication->human_name = $this->humanName;
+            $this->serviceApplication->description = $this->description;
+            $this->serviceApplication->setEditableUrls($this->fqdn);
+            $this->serviceApplication->image = $this->image;
+            $this->serviceApplication->exclude_from_status = $this->excludeFromStatus;
+            $this->serviceApplication->is_log_drain_enabled = $this->isLogDrainEnabled;
+            $this->serviceApplication->is_gzip_enabled = $this->isGzipEnabled;
+            $this->serviceApplication->is_stripprefix_enabled = $this->isStripprefixEnabled;
+            if ($this->serviceApplication->max_restart_count !== (int) $this->maxRestartCount) {
+                $this->serviceApplication->restart_limit_reached = false;
+            }
+            $this->serviceApplication->max_restart_count = $this->maxRestartCount;
+        } else {
+            $this->humanName = $this->serviceApplication->human_name;
+            $this->description = $this->serviceApplication->description;
+            $this->fqdn = $this->serviceApplication->url;
+            $this->image = $this->serviceApplication->image;
+            $this->excludeFromStatus = data_get($this->serviceApplication, 'exclude_from_status', false);
+            $this->isLogDrainEnabled = data_get($this->serviceApplication, 'is_log_drain_enabled', false);
+            $this->isGzipEnabled = data_get($this->serviceApplication, 'is_gzip_enabled', true);
+            $this->isStripprefixEnabled = data_get($this->serviceApplication, 'is_stripprefix_enabled', true);
+            $this->maxRestartCount = $this->serviceApplication->max_restart_count ?? 0;
+        }
+    }
+
+    public function saveMaxRestartCount(): void
+    {
+        $this->authorize('update', $this->serviceApplication);
+        $validated = $this->validate([
+            'maxRestartCount' => 'integer|min:0',
+        ]);
+
+        $this->serviceApplication->fill([
+            'max_restart_count' => $validated['maxRestartCount'],
+            'restart_limit_reached' => false,
+        ]);
+        $changedFields = auditChangedFields($this->serviceApplication);
+        $this->serviceApplication->save();
+        $this->auditServiceSubResourceUpdate($this->serviceApplication, $changedFields);
+        $this->dispatch('success', 'Max restart count saved.');
+    }
+
+    public function instantSaveApplication()
+    {
+        try {
+            $this->authorize('update', $this->serviceApplication);
+            $this->submitApplication();
+        } catch (\Throwable $e) {
+            return handleError($e, $this);
+        }
+    }
+
+    public function instantSaveApplicationSettings()
+    {
+        try {
+            $this->authorize('update', $this->serviceApplication);
+            $this->serviceApplication->is_gzip_enabled = $this->isGzipEnabled;
+            $this->serviceApplication->is_stripprefix_enabled = $this->isStripprefixEnabled;
+            $this->serviceApplication->exclude_from_status = $this->excludeFromStatus;
+            $changedFields = auditChangedFields($this->serviceApplication);
+            $this->serviceApplication->save();
+            $this->auditServiceSubResourceUpdate($this->serviceApplication, $changedFields);
+            $this->dispatch('success', 'Settings saved.');
+        } catch (\Throwable $e) {
+            return handleError($e, $this);
+        }
+    }
+
+    public function instantSaveApplicationAdvanced()
+    {
+        try {
+            $this->authorize('update', $this->serviceApplication);
+            if (! $this->serviceApplication->service->destination->server->isLogDrainEnabled()) {
+                $this->isLogDrainEnabled = false;
+                $this->dispatch('error', 'Log drain is not enabled on the server. Please enable it first.');
+
+                return;
+            }
+            $this->syncApplicationData(true);
+            $changedFields = auditChangedFields($this->serviceApplication);
+            $this->serviceApplication->save();
+            $this->auditServiceSubResourceUpdate($this->serviceApplication, $changedFields);
+            $this->dispatch('success', 'You need to restart the service for the changes to take effect.');
+        } catch (\Throwable $e) {
+            return handleError($e, $this);
+        }
+    }
+
+    public function deleteApplication($password, $selectedActions = [])
+    {
+        try {
+            $this->authorize('delete', $this->serviceApplication);
+
+            if (! verifyPasswordConfirmation($password, $this)) {
+                return 'The provided password is incorrect.';
+            }
+
+            $containerRemoved = app(DeleteService::class)->removeSubresourceContainer($this->serviceApplication);
+            $this->serviceApplication->delete();
+            $this->auditServiceSubResource('deleted', $this->serviceApplication, ['container_removed' => $containerRemoved]);
+            $containerRemoved
+                ? $this->dispatch('success', 'Application deleted.')
+                : $this->dispatch('warning', 'Application deleted from Coolify. The server does not respond, so its container is removed when the service starts again.');
+
+            return redirectRoute($this, 'project.service.configuration', $this->parameters);
+        } catch (\Throwable $e) {
+            return handleError($e, $this);
+        }
+    }
+
+    public function convertToDatabase()
+    {
+        try {
+            $this->authorize('update', $this->serviceApplication);
+            $service = $this->serviceApplication->service;
+            $serviceApplication = $this->serviceApplication;
+
+            if ($service->databases()->where('name', $serviceApplication->name)->exists()) {
+                throw new \Exception('A database with this name already exists.');
+            }
+
+            $redirectParams = collect($this->parameters)
+                ->except('database_uuid')
+                ->all();
+            $serviceDatabase = DB::transaction(function () use ($service, $serviceApplication) {
+                $serviceDatabase = $service->databases()->create([
+                    'name' => $serviceApplication->name,
+                    'human_name' => $serviceApplication->human_name,
+                    'description' => $serviceApplication->description,
+                    'exclude_from_status' => $serviceApplication->exclude_from_status,
+                    'is_log_drain_enabled' => $serviceApplication->is_log_drain_enabled,
+                    'image' => $serviceApplication->image,
+                    'service_id' => $service->id,
+                    'is_migrated' => true,
+                ]);
+                $serviceApplication->delete();
+
+                return $serviceDatabase;
+            });
+            $this->auditServiceSubResource('converted_to_database', $serviceApplication, [
+                'service_database_uuid' => $serviceDatabase->uuid,
+            ]);
+
+            return redirectRoute($this, 'project.service.configuration', $redirectParams);
+        } catch (\Throwable $e) {
+            return handleError($e, $this);
+        }
+    }
+
+    public function confirmDomainUsage()
+    {
+        $this->forceSaveDomains = true;
+        $this->showDomainConflictModal = false;
+        $this->submitApplication();
+    }
+
+    public function confirmRemovePort()
+    {
+        $this->forceRemovePort = true;
+        $this->showPortWarningModal = false;
+        $this->submitApplication();
+    }
+
+    public function cancelRemovePort()
+    {
+        $this->showPortWarningModal = false;
+        $this->syncApplicationData(false);
+    }
+
+    public function submitApplication()
+    {
+        try {
+            $persistedApplication = $this->serviceApplication->fresh();
+            $previousDnsHostnames = app(ManagedDnsRecordCleanup::class)->hostnamesOf($persistedApplication);
+            $previousEditableUrls = $persistedApplication->url;
+            $previousFqdn = $persistedApplication->fqdn;
+            $previousPortOverrides = $persistedApplication->domain_port_overrides;
+            $this->authorize('update', $this->serviceApplication);
+            $this->validate([
+                'fqdn' => ValidationPatterns::applicationDomainRules(),
+            ]);
+
+            $this->fqdn = ValidationPatterns::normalizeApplicationDomains($this->fqdn);
+            $warning = sslipDomainWarning($this->fqdn);
+            if ($warning) {
+                $this->dispatch('warning', __('warning.sslipdomain'));
+            }
+
+            $this->syncApplicationData(true);
+
+            if (! $this->forceSaveDomains) {
+                $result = checkDomainUsage(resource: $this->serviceApplication);
+                if ($result['hasConflicts']) {
+                    $this->domainConflicts = $result['conflicts'];
+                    $this->showDomainConflictModal = true;
+
+                    return;
+                }
+            } else {
+                $this->forceSaveDomains = false;
+            }
+
+            if (! $this->forceRemovePort) {
+                $requiredPort = $this->serviceApplication->getRequiredPort();
+
+                if ($requiredPort !== null) {
+                    foreach (str($this->fqdn)->trim()->explode(',') as $fqdn) {
+                        $fqdn = trim((string) $fqdn);
+                        if ($fqdn === '') {
+                            continue;
+                        }
+
+                        if ($this->serviceApplication->portRequiresConfirmation($fqdn, $requiredPort, $previousEditableUrls)) {
+                            $this->requiredPort = $requiredPort;
+                            $this->showPortWarningModal = true;
+                            $this->serviceApplication->fqdn = $previousFqdn;
+                            $this->serviceApplication->domain_port_overrides = $previousPortOverrides;
+
+                            return;
+                        }
+                    }
+                }
+            } else {
+                $this->forceRemovePort = false;
+            }
+
+            $this->validate();
+            $changedFields = auditChangedFields($this->serviceApplication);
+            $this->serviceApplication->save();
+            $this->auditServiceSubResourceUpdate($this->serviceApplication, $changedFields);
+            $this->serviceApplication->refresh();
+            app(ManagedDnsRecordCleanup::class)->queueReleaseOfRemovedHostnames($this->serviceApplication, $previousDnsHostnames, $this->service->team()->id);
+            $this->syncApplicationData(false);
+            updateCompose($this->serviceApplication);
+            if (str($this->serviceApplication->fqdn)->contains(',')) {
+                $this->dispatch('warning', 'Some services do not support multiple domains, which can lead to problems and is NOT RECOMMENDED.<br><br>Only use multiple domains if you know what you are doing.');
+            } else {
+                ! $warning && $this->dispatch('success', 'Service saved.');
+            }
+            $this->dispatch('generateDockerCompose');
+        } catch (\Throwable $e) {
+            $originalFqdn = $this->serviceApplication->getOriginal('fqdn');
+            if ($originalFqdn !== $this->serviceApplication->fqdn) {
+                $this->serviceApplication->fqdn = $originalFqdn;
+                $this->syncApplicationData(false);
+            }
+
+            return handleError($e, $this);
+        }
+    }
+
+    // [CORELIX ENHANCED: Traefik label overrides methods]
+
+    /**
+     * Initialise label override state from the given model (ServiceApplication or ServiceDatabase).
+     *
+     * @param  \App\Models\ServiceApplication|\App\Models\ServiceDatabase  $model
+     * @param  string  $containerName  Name of the compose service for this container
+     */
+    private function initializeLabelOverrides($model, string $containerName): void
+    {
+        if (! class_exists(\CorelixIo\Platform\Services\LabelOverrideService::class)) {
+            return;
+        }
+
+        $overrides = $model->label_overrides ?? [];
+        $this->labelOverridesYaml = \CorelixIo\Platform\Services\LabelOverrideService::toYamlString($overrides);
+        $this->generatedLabels = \CorelixIo\Platform\Services\LabelOverrideService::getGeneratedLabelsForContainer(
+            $this->service,
+            $containerName
+        );
+    }
+
+    /**
+     * Save label overrides for a ServiceApplication container and trigger a re-parse.
+     */
+    public function saveLabelOverridesApplication()
+    {
+        if (! class_exists(\CorelixIo\Platform\Services\LabelOverrideService::class)) {
+            return;
+        }
+
+        try {
+            $this->authorize('update', $this->service);
+            $this->labelOverridesError = '';
+
+            $overrides = blank($this->labelOverridesYaml)
+                ? null
+                : \CorelixIo\Platform\Services\LabelOverrideService::parseYamlInput($this->labelOverridesYaml);
+
+            $this->serviceApplication->update(['label_overrides' => $overrides]);
+            $this->service->parse();
+
+            $this->generatedLabels = \CorelixIo\Platform\Services\LabelOverrideService::getGeneratedLabelsForContainer(
+                $this->service->fresh(),
+                $this->serviceApplication->name
+            );
+
+            $this->dispatch('success', 'Label overrides saved and applied.');
+        } catch (\InvalidArgumentException $e) {
+            $this->labelOverridesError = $e->getMessage();
+        } catch (\Throwable $e) {
+            return handleError($e, $this);
+        }
+    }
+
+    /**
+     * Clear all label overrides for a ServiceApplication container.
+     */
+    public function clearLabelOverridesApplication()
+    {
+        if (! class_exists(\CorelixIo\Platform\Services\LabelOverrideService::class)) {
+            return;
+        }
+
+        try {
+            $this->authorize('update', $this->service);
+            $this->serviceApplication->update(['label_overrides' => null]);
+            $this->labelOverridesYaml = '';
+            $this->labelOverridesError = '';
+            $this->service->parse();
+
+            $this->generatedLabels = \CorelixIo\Platform\Services\LabelOverrideService::getGeneratedLabelsForContainer(
+                $this->service->fresh(),
+                $this->serviceApplication->name
+            );
+
+            $this->dispatch('success', 'Label overrides cleared.');
+        } catch (\Throwable $e) {
+            return handleError($e, $this);
+        }
+    }
+
+    /**
+     * Save label overrides for a ServiceDatabase container and trigger a re-parse.
+     */
+    public function saveLabelOverridesDatabase()
+    {
+        if (! class_exists(\CorelixIo\Platform\Services\LabelOverrideService::class)) {
+            return;
+        }
+
+        try {
+            $this->authorize('update', $this->service);
+            $this->labelOverridesError = '';
+
+            $overrides = blank($this->labelOverridesYaml)
+                ? null
+                : \CorelixIo\Platform\Services\LabelOverrideService::parseYamlInput($this->labelOverridesYaml);
+
+            $this->serviceDatabase->update(['label_overrides' => $overrides]);
+            $this->service->parse();
+
+            $this->generatedLabels = \CorelixIo\Platform\Services\LabelOverrideService::getGeneratedLabelsForContainer(
+                $this->service->fresh(),
+                $this->serviceDatabase->name
+            );
+
+            $this->dispatch('success', 'Label overrides saved and applied.');
+        } catch (\InvalidArgumentException $e) {
+            $this->labelOverridesError = $e->getMessage();
+        } catch (\Throwable $e) {
+            return handleError($e, $this);
+        }
+    }
+
+    /**
+     * Clear all label overrides for a ServiceDatabase container.
+     */
+    public function clearLabelOverridesDatabase()
+    {
+        if (! class_exists(\CorelixIo\Platform\Services\LabelOverrideService::class)) {
+            return;
+        }
+
+        try {
+            $this->authorize('update', $this->service);
+            $this->serviceDatabase->update(['label_overrides' => null]);
+            $this->labelOverridesYaml = '';
+            $this->labelOverridesError = '';
+            $this->service->parse();
+
+            $this->generatedLabels = \CorelixIo\Platform\Services\LabelOverrideService::getGeneratedLabelsForContainer(
+                $this->service->fresh(),
+                $this->serviceDatabase->name
+            );
+
+            $this->dispatch('success', 'Label overrides cleared.');
+        } catch (\Throwable $e) {
+            return handleError($e, $this);
+        }
+    }
+
+    // [END CORELIX ENHANCED: Traefik label overrides methods]
+
+    public function render()
+    {
+        return view('livewire.project.service.index');
+    }
+
+    /**
+     * Records `ui.service_{application|database}.updated` with the attributes that the save changed.
+     *
+     * @param  array<int, string>  $changedFields  Fields changed by the save, captured before it.
+     * @param  array<string, mixed>  $extra
+     */
+    private function auditServiceSubResourceUpdate(ServiceApplication|ServiceDatabase $resource, array $changedFields, array $extra = []): void
+    {
+        if ($changedFields === []) {
+            return;
+        }
+
+        $this->auditServiceSubResource('updated', $resource, ['changed_fields' => $changedFields, ...$extra]);
+    }
+
+    /**
+     * Mirrors the context of `api.service_database.updated` for service applications and databases.
+     *
+     * @param  array<string, mixed>  $extra
+     */
+    private function auditServiceSubResource(string $action, ServiceApplication|ServiceDatabase $resource, array $extra = []): void
+    {
+        $resourceKey = $resource instanceof ServiceApplication ? 'service_application' : 'service_database';
+        $service = $resource->service ?? $this->service;
+
+        auditLog("ui.{$resourceKey}.{$action}", [
+            'team_id' => $service?->team()?->id,
+            'service_uuid' => $service?->uuid,
+            'service_name' => $service?->name,
+            "{$resourceKey}_uuid" => $resource->uuid,
+            "{$resourceKey}_name" => $resource->name,
+            ...$extra,
+        ]);
+    }
+}
